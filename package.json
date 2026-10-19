@@ -1,0 +1,24 @@
+{
+  "name": "antigravity-companion-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remote companion and permission interceptor for Google Antigravity CLI",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev:cli": "npm run dev --workspace=@agy-companion/cli",
+    "dev:web": "npm run dev --workspace=@agy-companion/web",
+    "start": "npm run start --workspace=@agy-companion/cli"
+  },
+  "keywords": [
+    "antigravity",
+    "ai-agent",
+    "cli",
+    "companion",
+    "remote-control"
+  ],
+  "author": "",
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,16 @@
+{
+  "agy-companion-gate": {
+    "PreToolUse": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"d:/CODE/antigravity compainion/hooks/interceptor.js\"",
+            "timeout": 305
+          }
+        ]
+      }
+    ]
+  }
+}
