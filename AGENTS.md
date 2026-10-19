@@ -29,4 +29,15 @@ Take the first option that fully works:
 
 Never cut: validation at trust boundaries, error handling that prevents data loss, security, accessibility, the calibration real hardware needs, anything the user asked for.
 
+## UI/UX Craft & Anti-AI-Slop Mandate
+
+When designing or writing frontend code (website, companion web app, mobile APK, notifications, components):
+- **Zero "AI UI" Slop:** No purple/indigo gradient headers, no generic centered cards on light gray backgrounds, no oversized toy pill buttons with diffuse shadows, no unstyled monospace dumps.
+- **Aesthetic Fidelity:** Follow Linear / Raycast / Vercel craftsmanship. Use calibrated dark slate surfaces (`#090d16`, `#0f172a`, `#182238`), crisp 1px hairline borders (`rgba(255,255,255,0.08)`), tight typographic hierarchy (`Inter` / `Geist Mono`), high information density, and tactile feedback (`active:scale-[0.98]`).
+- **Required Design Skills & Tooling:**
+  1. Use `.agents/skills/design-craft/SKILL.md` for layout, anti-slop rules, and dark theme elevation.
+  2. Use `.agents/skills/mobile-ux/SKILL.md` for touch ergonomics (44px tap targets, thumb zone, haptic feedback).
+  3. Use `frontend-design` and `build-ui` for structured component and system design.
+  4. For screen generations, wireframing, and design system synchronization, leverage **StitchMCP** (`create_design_system`, `generate_screen_from_text`, `apply_design_system`).
+
 (Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)
