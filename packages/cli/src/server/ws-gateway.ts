@@ -14,6 +14,7 @@ import {
 import { HookIpcServer } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
 import { AgyEngine } from '../engine/agy-engine.js';
+import { IdeTranscriptWatcher } from '../session/ide-watcher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,6 +25,7 @@ export class WsGateway {
   private httpServer: http.Server | null = null;
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
+  private ideWatcher: IdeTranscriptWatcher;
 
   constructor(
     private hookIpc: HookIpcServer,
@@ -31,11 +33,31 @@ export class WsGateway {
     private agyEngine: AgyEngine,
     private port: number = DEFAULT_DAEMON_PORT
   ) {
+    this.ideWatcher = new IdeTranscriptWatcher();
     this.setupHookListeners();
+    this.setupIdeWatcher();
+  }
+
+  private setupIdeWatcher(): void {
+    // Auto-discover existing active Antigravity IDE conversation
+    this.ideWatcher.autoDiscoverActiveConversation();
+
+    this.ideWatcher.on('message', message => {
+      const activeWs = this.workspaceManager.listWorkspaces()[0];
+      const wsId = activeWs ? activeWs.id : 'default';
+      this.broadcast({
+        type: 'server:chat_message',
+        workspaceId: wsId,
+        message,
+      });
+    });
   }
 
   private setupHookListeners(): void {
-    this.hookIpc.on('approval_requested', (request: ApprovalRequest) => {
+    this.hookIpc.on('approval_requested', (request: ApprovalRequest, hookContext?: any) => {
+      if (hookContext?.transcriptPath) {
+        this.ideWatcher.setTranscriptPath(hookContext.transcriptPath);
+      }
       this.workspaceManager.addPendingApproval(request);
       this.broadcast({
         type: 'server:approval_requested',

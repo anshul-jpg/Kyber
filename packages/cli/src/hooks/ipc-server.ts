@@ -80,7 +80,7 @@ export class HookIpcServer extends EventEmitter {
     });
 
     // Emit event so WebSocket Gateway can push to mobile
-    this.emit('approval_requested', request);
+    this.emit('approval_requested', request, hookContext);
   }
 
   public resolveApproval(payload: ApprovalDecisionPayload): boolean {
