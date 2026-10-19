@@ -38,7 +38,9 @@ export class AgyEngine extends EventEmitter {
     if (conversationId) {
       args.push('--conversation', conversationId);
     }
-    args.push('-p', prompt, '--output-format', 'stream-json');
+    // Escape double quotes and wrap in quotes for Windows cmd.exe
+    const escapedPrompt = `"${prompt.replace(/"/g, '\\"')}"`;
+    args.push('-p', escapedPrompt, '--output-format', 'stream-json');
 
     console.log(`[AgyEngine] Spawning in ${workspacePath}: agy ${args.join(' ')}`);
 

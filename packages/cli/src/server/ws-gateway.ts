@@ -217,6 +217,30 @@ export class WsGateway {
         const wsState = this.workspaceManager.getWorkspace(msg.workspaceId) || this.workspaceManager.listWorkspaces()[0];
         if (!wsState) return;
 
+        // If no active IDE conversation is yet attached, attempt auto-discovery
+        if (!this.ideWatcher.getActiveConversationId()) {
+          this.ideWatcher.autoDiscoverActiveConversation();
+        }
+
+        // If an active Antigravity IDE conversation is being tracked, inject into this IDE chat!
+        if (this.ideWatcher.getActiveConversationId()) {
+          const injected = this.ideWatcher.injectMessageToIde(msg.prompt);
+          if (injected) {
+            // Optimistically show user message on phone
+            this.broadcast({
+              type: 'server:chat_message',
+              workspaceId: wsState.id,
+              message: {
+                id: `msg_u_${Date.now()}`,
+                role: 'user',
+                content: msg.prompt,
+                timestamp: Date.now(),
+              },
+            });
+            return;
+          }
+        }
+
         this.workspaceManager.updateStatus(wsState.id, 'busy');
 
         // Broadcast user's sent message to all connected devices
@@ -231,7 +255,7 @@ export class WsGateway {
           },
         });
 
-        // Run turn with session continuity
+        // Fallback: Run turn with session continuity in CLI mode
         const turn = this.agyEngine.runTurn(wsState.path, msg.prompt, wsState.currentConversationId);
 
         turn.on('init', data => {

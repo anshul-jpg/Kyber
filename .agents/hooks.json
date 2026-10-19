@@ -2,7 +2,7 @@
   "agy-companion-gate": {
     "PreToolUse": [
       {
-        "matcher": ".*",
+        "matcher": "*",
         "hooks": [
           {
             "type": "command",

@@ -34,13 +34,14 @@ export class IdeTranscriptWatcher extends EventEmitter {
 
       if (dirs.length === 0) return null;
 
-      // Sort by modified time descending to pick the most recent active conversation
-      const sorted = dirs
+      // Sort by modified time of transcript.jsonl descending
+      const candidates = dirs
         .map(d => {
-          const fullPath = path.join(brainDir, d.name);
+          const transcriptPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
           try {
-            const stat = fs.statSync(fullPath);
-            return { name: d.name, path: fullPath, mtime: stat.mtimeMs };
+            if (!fs.existsSync(transcriptPath)) return null;
+            const stat = fs.statSync(transcriptPath);
+            return { name: d.name, path: transcriptPath, mtime: stat.mtimeMs };
           } catch {
             return null;
           }
@@ -48,12 +49,9 @@ export class IdeTranscriptWatcher extends EventEmitter {
         .filter((d): d is { name: string; path: string; mtime: number } => d !== null)
         .sort((a, b) => b.mtime - a.mtime);
 
-      if (sorted.length > 0) {
-        const latestTranscript = path.join(sorted[0].path, '.system_generated', 'logs', 'transcript.jsonl');
-        if (fs.existsSync(latestTranscript)) {
-          this.setTranscriptPath(latestTranscript);
-          return latestTranscript;
-        }
+      if (candidates.length > 0) {
+        this.setTranscriptPath(candidates[0].path);
+        return candidates[0].path;
       }
     } catch (err: any) {
       console.warn(`[IdeWatcher] Auto-discover warning: ${err.message}`);
@@ -158,6 +156,57 @@ export class IdeTranscriptWatcher extends EventEmitter {
     if (this.watchTimer) {
       clearInterval(this.watchTimer);
       this.watchTimer = null;
+    }
+  }
+
+  public getActiveConversationId(): string | null {
+    if (!this.activeTranscriptPath) return null;
+    const normalized = this.activeTranscriptPath.replace(/\\/g, '/');
+    const match = normalized.match(/\/brain\/([^\/]+)\//);
+    return match ? match[1] : null;
+  }
+
+  public injectMessageToIde(content: string): boolean {
+    const convId = this.getActiveConversationId();
+    if (!convId) return false;
+
+    const home = os.homedir();
+    const undeliveredDir = path.join(
+      home,
+      '.gemini',
+      'antigravity-ide',
+      'brain',
+      convId,
+      '.system_generated',
+      'messages',
+      'undelivered'
+    );
+
+    try {
+      if (!fs.existsSync(undeliveredDir)) {
+        fs.mkdirSync(undeliveredDir, { recursive: true });
+      }
+
+      const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const payload = {
+        id: msgId,
+        recipient: convId,
+        sender: 'companion-phone',
+        priority: 'MESSAGE_PRIORITY_HIGH',
+        timestamp: new Date().toISOString(),
+        renderDetails: {
+          messageTitle: 'Prompt from Mobile Companion',
+        },
+        content: `[📱 Message from Phone]: ${content}`,
+      };
+
+      const targetFile = path.join(undeliveredDir, `${msgId}.json`);
+      fs.writeFileSync(targetFile, JSON.stringify(payload, null, 2), 'utf8');
+      console.log(`\n📱 [PHONE -> IDE] Delivered prompt to active IDE chat: "${content}"\n`);
+      return true;
+    } catch (err: any) {
+      console.error(`[IdeWatcher] Failed to inject message into IDE:`, err.message);
+      return false;
     }
   }
 }

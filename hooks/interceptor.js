@@ -12,6 +12,16 @@
  */
 
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
+
+const LOG_FILE = path.resolve(__dirname, 'hook_debug.log');
+
+function logDebug(msg) {
+  try {
+    fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`);
+  } catch {}
+}
 
 async function readStdin() {
   return new Promise((resolve, reject) => {
@@ -79,19 +89,24 @@ function postToDaemon(payload, timeoutMs = 300000) {
 async function main() {
   try {
     const hookContext = await readStdin();
+    logDebug(`Hook invoked with context: ${JSON.stringify(hookContext)}`);
 
     // Check if toolCall is present
     if (!hookContext.toolCall) {
+      logDebug('No toolCall in context, allowing');
       process.stdout.write(JSON.stringify({ decision: 'allow' }));
       process.exit(0);
       return;
     }
 
     // Forward to companion daemon for mobile approval
+    logDebug(`Posting to daemon: ${hookContext.toolCall.name}`);
     const result = await postToDaemon(hookContext);
+    logDebug(`Daemon returned: ${JSON.stringify(result)}`);
     process.stdout.write(JSON.stringify(result));
     process.exit(0);
   } catch (error) {
+    logDebug(`Hook error: ${error.message}`);
     // Fail-safe: Always fall back to "ask" on any unexpected error
     process.stdout.write(
       JSON.stringify({
