@@ -13,6 +13,7 @@ import {
 } from '@agy-companion/protocol';
 import { HookIpcServer } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
+import { AgyEngine } from '../engine/agy-engine.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ export class WsGateway {
   constructor(
     private hookIpc: HookIpcServer,
     private workspaceManager: WorkspaceManager,
+    private agyEngine: AgyEngine,
     private port: number = DEFAULT_DAEMON_PORT
   ) {
     this.setupHookListeners();
@@ -189,9 +191,62 @@ export class WsGateway {
         );
         break;
 
-      case 'client:send_prompt':
-        // For future: route prompt into active session process
+      case 'client:send_prompt': {
+        const wsState = this.workspaceManager.getWorkspace(msg.workspaceId) || this.workspaceManager.listWorkspaces()[0];
+        if (!wsState) return;
+
+        this.workspaceManager.updateStatus(wsState.id, 'busy');
+
+        // Broadcast user's sent message to all connected devices
+        this.broadcast({
+          type: 'server:chat_message',
+          workspaceId: wsState.id,
+          message: {
+            id: `msg_u_${Date.now()}`,
+            role: 'user',
+            content: msg.prompt,
+            timestamp: Date.now(),
+          },
+        });
+
+        // Run turn with session continuity
+        const turn = this.agyEngine.runTurn(wsState.path, msg.prompt, wsState.currentConversationId);
+
+        turn.on('init', data => {
+          this.workspaceManager.setConversationId(wsState.id, data.conversationId);
+        });
+
+        turn.on('step', step => {
+          if (step.textDelta) {
+            this.broadcast({
+              type: 'server:stream_token',
+              workspaceId: wsState.id,
+              token: step.textDelta,
+            });
+          }
+        });
+
+        turn.on('result', res => {
+          this.workspaceManager.updateStatus(wsState.id, 'idle');
+          this.broadcast({
+            type: 'server:chat_message',
+            workspaceId: wsState.id,
+            message: {
+              id: `msg_a_${Date.now()}`,
+              role: 'assistant',
+              content: res.response || (res.status === 'ERROR' ? `Error: ${res.error}` : ''),
+              timestamp: Date.now(),
+            },
+          });
+        });
+
+        turn.on('close', () => {
+          if (wsState.status === 'busy') {
+            this.workspaceManager.updateStatus(wsState.id, 'idle');
+          }
+        });
         break;
+      }
 
       default:
         break;

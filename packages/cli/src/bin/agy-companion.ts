@@ -6,6 +6,7 @@ import { DEFAULT_DAEMON_PORT, HOOK_IPC_PORT } from '@agy-companion/protocol';
 import { HookIpcServer } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
 import { WsGateway } from '../server/ws-gateway.js';
+import { AgyEngine } from '../engine/agy-engine.js';
 
 function getLocalIp(): string {
   const interfaces = os.networkInterfaces();
@@ -41,7 +42,8 @@ async function main() {
 
   const hookIpc = new HookIpcServer(HOOK_IPC_PORT);
   const workspaceManager = new WorkspaceManager();
-  const wsGateway = new WsGateway(hookIpc, workspaceManager, DEFAULT_DAEMON_PORT);
+  const agyEngine = new AgyEngine();
+  const wsGateway = new WsGateway(hookIpc, workspaceManager, agyEngine, DEFAULT_DAEMON_PORT);
 
   // Register current workspace
   const activeWs = workspaceManager.registerWorkspace(currentDir);
