@@ -1,11 +1,47 @@
 import http from 'http';
 import { EventEmitter } from 'events';
-import { ApprovalRequest, ApprovalDecisionPayload, HOOK_IPC_PORT } from '@agy-companion/protocol';
+import { execSync } from 'child_process';
+import path from 'path';
+import { ApprovalRequest, ApprovalDecisionPayload, GitFileChange, HOOK_IPC_PORT } from '@agy-companion/protocol';
 
 interface PendingRequest {
   request: ApprovalRequest;
-  resolve: (decision: { decision: 'allow' | 'deny' | 'force_ask'; reason?: string }) => void;
+  resolve: (decision: { decision: 'allow' | 'deny' | 'force_ask'; reason?: string; permissionOverrides?: string[] }) => void;
   timer: NodeJS.Timeout;
+}
+
+function getWorkspaceGitChanges(cwd: string): GitFileChange[] {
+  try {
+    const numstat = execSync('git diff --numstat', { cwd, encoding: 'utf8', timeout: 2500 });
+    const status = execSync('git status --porcelain', { cwd, encoding: 'utf8', timeout: 2500 });
+    const changes: GitFileChange[] = [];
+    const statusMap = new Map<string, string>();
+    for (const line of status.trim().split('\n')) {
+      if (!line) continue;
+      const s = line.substring(0, 2).trim();
+      const f = line.substring(3).trim();
+      statusMap.set(f, s);
+    }
+    for (const line of numstat.trim().split('\n')) {
+      if (!line) continue;
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        const ins = parseInt(parts[0], 10) || 0;
+        const del = parseInt(parts[1], 10) || 0;
+        const file = parts[2].trim();
+        changes.push({
+          file: path.basename(file),
+          relativePath: file,
+          insertions: ins,
+          deletions: del,
+          status: statusMap.get(file) || 'M',
+        });
+      }
+    }
+    return changes;
+  } catch {
+    return [];
+  }
 }
 
 export class HookIpcServer extends EventEmitter {
@@ -47,14 +83,24 @@ export class HookIpcServer extends EventEmitter {
 
   private handlePreToolUse(hookContext: any, res: http.ServerResponse) {
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const timeoutSeconds = 300;
+    const timeoutSeconds = 3600;
+    const wsPath = (hookContext.workspacePaths && hookContext.workspacePaths[0]) || process.cwd();
+
+    const toolCall = hookContext.toolCall || { name: 'unknown', args: {} };
+    const toolAction = toolCall.args?.toolAction || toolCall.args?.toolSummary || toolCall.args?.Description;
+    const cmd = toolCall.args?.CommandLine;
+    const toolTitle = toolAction ? `Allow ${toolAction}?` : (cmd ? `Allow running ${cmd}?` : `Allow executing ${toolCall.name}?`);
+
+    const gitChanges = getWorkspaceGitChanges(wsPath);
 
     const request: ApprovalRequest = {
       id: requestId,
       conversationId: hookContext.conversationId || 'default',
-      workspacePath: (hookContext.workspacePaths && hookContext.workspacePaths[0]) || process.cwd(),
+      workspacePath: wsPath,
       stepIdx: hookContext.stepIdx,
-      toolCall: hookContext.toolCall || { name: 'unknown', args: {} },
+      toolCall,
+      toolTitle,
+      gitChanges,
       timestamp: Date.now(),
       timeoutSeconds,
     };
@@ -88,21 +134,36 @@ export class HookIpcServer extends EventEmitter {
     if (!pending) return false;
 
     if (payload.decision === 'allow') {
-      pending.resolve({ decision: 'allow' });
+      const cmd = pending.request.toolCall?.args?.CommandLine;
+      const overrides = cmd ? [`command(${cmd})`] : undefined;
+      pending.resolve({
+        decision: 'allow',
+        ...(overrides ? { permissionOverrides: overrides } : {}),
+      });
     } else if (payload.decision === 'deny') {
       pending.resolve({
         decision: 'deny',
-        reason: payload.reason || 'Denied remotely via companion app',
+        reason: payload.reason || payload.interceptPrompt || 'Denied remotely via companion app',
       });
     } else if (payload.decision === 'intercept') {
       pending.resolve({
         decision: 'deny',
-        reason: `Intercepted by user: ${payload.interceptPrompt || 'Execution halted'}`,
+        reason: `User redirected agent: ${payload.interceptPrompt || 'Execution halted'}`,
       });
     }
 
     this.emit('approval_resolved', payload);
     return true;
+  }
+
+  public resolveByCommand(commandLine: string): void {
+    for (const [id, pending] of this.pendingRequests.entries()) {
+      if (pending.request.toolCall?.args?.CommandLine === commandLine) {
+        pending.resolve({ decision: 'allow' });
+        this.emit('approval_resolved', { requestId: id, decision: 'allow' });
+        break;
+      }
+    }
   }
 
   public getPendingRequests(): ApprovalRequest[] {

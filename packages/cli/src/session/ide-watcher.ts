@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { ChatMessage } from '@agy-companion/protocol';
 
@@ -8,6 +9,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
   private activeTranscriptPath: string | null = null;
   private lastReadBytes: number = 0;
   private watchTimer: NodeJS.Timeout | null = null;
+  private messageHistory: ChatMessage[] = [];
 
   constructor() {
     super();
@@ -18,9 +20,27 @@ export class IdeTranscriptWatcher extends EventEmitter {
 
     this.activeTranscriptPath = transcriptPath;
     this.lastReadBytes = 0;
+    this.messageHistory = [];
     console.log(`[IdeWatcher] Now tracking IDE transcript: ${transcriptPath}`);
     this.readNewEntries();
     this.startWatching();
+  }
+
+  public getHistory(): ChatMessage[] {
+    if (this.messageHistory.length === 0 && this.activeTranscriptPath && fs.existsSync(this.activeTranscriptPath)) {
+      try {
+        const content = fs.readFileSync(this.activeTranscriptPath, 'utf8');
+        const lines = content.split('\n').filter(l => l.trim().length > 0);
+        for (const line of lines) {
+          try {
+            const entry = JSON.parse(line);
+            this.handleTranscriptEntry(entry, false);
+          } catch {}
+        }
+        this.lastReadBytes = fs.statSync(this.activeTranscriptPath).size;
+      } catch {}
+    }
+    return [...this.messageHistory];
   }
 
   public autoDiscoverActiveConversation(workspaceDir?: string): string | null {
@@ -104,7 +124,16 @@ export class IdeTranscriptWatcher extends EventEmitter {
     }
   }
 
-  private handleTranscriptEntry(entry: any): void {
+  private recordMessage(msg: ChatMessage, emitLive: boolean = true): void {
+    if (!this.messageHistory.some(m => m.id === msg.id)) {
+      this.messageHistory.push(msg);
+      if (emitLive) {
+        this.emit('message', msg);
+      }
+    }
+  }
+
+  private handleTranscriptEntry(entry: any, emitLive: boolean = true): void {
     // 1. User Message in IDE
     if (entry.type === 'USER_INPUT' && entry.content) {
       let cleanContent = entry.content;
@@ -120,7 +149,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
         content: cleanContent,
         timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
       };
-      this.emit('message', msg);
+      this.recordMessage(msg, emitLive);
     }
 
     // 2. Model Response in IDE
@@ -133,23 +162,38 @@ export class IdeTranscriptWatcher extends EventEmitter {
           timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
           thought: entry.thinking,
         };
-        this.emit('message', msg);
+        this.recordMessage(msg, emitLive);
       } else if (entry.tool_calls && entry.tool_calls.length > 0) {
         for (const tc of entry.tool_calls) {
+          const summary = this.getToolSummary(tc.name, tc.args);
           const msg: ChatMessage = {
             id: `ide_t_${entry.step_index || Date.now()}_${tc.name}`,
-            role: 'assistant',
-            content: `🔧 Running tool: **${tc.name}**\n\`\`\`json\n${JSON.stringify(tc.args, null, 2)}\n\`\`\``,
+            role: 'tool',
+            content: summary,
             timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
             toolCall: {
               name: tc.name,
               args: tc.args || {},
             },
           };
-          this.emit('message', msg);
+          this.recordMessage(msg, emitLive);
         }
       }
     }
+  }
+
+  private getToolSummary(name: string, args: any): string {
+    if (!args) return name;
+    if (args.toolSummary) return args.toolSummary;
+    if (args.toolAction) return args.toolAction;
+    if (args.Description) return args.Description;
+    if (name === 'run_command' && args.CommandLine) return args.CommandLine;
+    if ((name === 'view_file' || name === 'replace_file_content' || name === 'write_to_file') && (args.AbsolutePath || args.TargetFile)) {
+      const p = (args.AbsolutePath || args.TargetFile).replace(/\\/g, '/').split('/');
+      return `${name === 'view_file' ? 'View' : 'Edit'} ${p[p.length - 1]}`;
+    }
+    if (name === 'grep_search' && args.Query) return `Search "${args.Query}"`;
+    return name;
   }
 
   public stop(): void {
@@ -171,27 +215,31 @@ export class IdeTranscriptWatcher extends EventEmitter {
     if (!convId) return false;
 
     const home = os.homedir();
-    const undeliveredDir = path.join(
+    const messagesDir = path.join(
       home,
       '.gemini',
       'antigravity-ide',
       'brain',
       convId,
       '.system_generated',
-      'messages',
-      'undelivered'
+      'messages'
     );
+    const undeliveredDir = path.join(messagesDir, 'undelivered');
 
     try {
+      if (!fs.existsSync(messagesDir)) {
+        fs.mkdirSync(messagesDir, { recursive: true });
+      }
       if (!fs.existsSync(undeliveredDir)) {
         fs.mkdirSync(undeliveredDir, { recursive: true });
       }
 
-      const msgId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      // Generate RFC4122 v4 UUID
+      const msgId = crypto.randomUUID();
       const payload = {
         id: msgId,
         recipient: convId,
-        sender: 'companion-phone',
+        sender: 'companion',
         priority: 'MESSAGE_PRIORITY_HIGH',
         timestamp: new Date().toISOString(),
         renderDetails: {
@@ -200,8 +248,15 @@ export class IdeTranscriptWatcher extends EventEmitter {
         content: `[📱 Message from Phone]: ${content}`,
       };
 
-      const targetFile = path.join(undeliveredDir, `${msgId}.json`);
-      fs.writeFileSync(targetFile, JSON.stringify(payload, null, 2), 'utf8');
+      // Antigravity IDE protocol:
+      // 1. Full JSON payload resides in messages/<msgId>.json
+      const messageFile = path.join(messagesDir, `${msgId}.json`);
+      fs.writeFileSync(messageFile, JSON.stringify(payload, null, 2), 'utf8');
+
+      // 2. 0-byte queue marker resides in messages/undelivered/<msgId> (WITHOUT .json)
+      const markerFile = path.join(undeliveredDir, msgId);
+      fs.writeFileSync(markerFile, '', 'utf8');
+
       console.log(`\n📱 [PHONE -> IDE] Delivered prompt to active IDE chat: "${content}"\n`);
       return true;
     } catch (err: any) {

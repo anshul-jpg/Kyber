@@ -6,7 +6,7 @@
 const { spawn } = require('child_process');
 const path = require('path');
 
-const hookScript = path.resolve(__dirname, '../hooks/interceptor.js');
+const hookScript = path.resolve(__dirname, '../.agents/interceptor.js');
 
 const mockHookInput = {
   conversationId: 'test-conv-1234',

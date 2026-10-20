@@ -40,4 +40,14 @@ When designing or writing frontend code (website, companion web app, mobile APK,
   3. Use `frontend-design` and `build-ui` for structured component and system design.
   4. For screen generations, wireframing, and design system synchronization, leverage **StitchMCP** (`create_design_system`, `generate_screen_from_text`, `apply_design_system`).
 
+## Antigravity Companion Universal Integration
+
+When the user says **"enable companion in this project"**, **"setup companion"**, or asks to route tool approvals to their phone:
+1. Immediately run the universal hook installer:
+   ```powershell
+   node "d:\CODE\antigravity compainion\packages\cli\dist\bin\agy-companion.js" hook install .
+   ```
+2. This creates `.agents/hooks.json` and `.agents/interceptor.js`, linking the workspace directly to the global companion mode (`~/.agy-companion-mode`) and companion daemon.
+3. Inform the user that the companion hook is enabled, and remind them that switching between Desk and Remote modes on their phone companion will immediately govern approvals in this project.
+
 (Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)

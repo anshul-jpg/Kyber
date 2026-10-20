@@ -1,6 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
@@ -36,6 +37,50 @@ export class WsGateway {
     this.ideWatcher = new IdeTranscriptWatcher();
     this.setupHookListeners();
     this.setupIdeWatcher();
+  }
+
+  private getGlobalModeFilePath(): string {
+    return path.resolve(os.homedir(), '.agy-companion-mode');
+  }
+
+  public getMode(): 'desk' | 'remote' {
+    try {
+      // 1. Check workspace-specific override if present
+      const cwdPath = path.resolve(process.cwd(), '.agents/companion-mode');
+      if (fs.existsSync(cwdPath)) {
+        const val = fs.readFileSync(cwdPath, 'utf8').trim().toLowerCase();
+        if (val === 'desk' || val === 'remote') return val;
+      }
+      // 2. Check global ~/.agy-companion-mode
+      const globalPath = this.getGlobalModeFilePath();
+      if (fs.existsSync(globalPath)) {
+        const val = fs.readFileSync(globalPath, 'utf8').trim().toLowerCase();
+        if (val === 'desk' || val === 'remote') return val;
+      }
+    } catch {}
+    return 'remote';
+  }
+
+  public setMode(mode: 'desk' | 'remote'): void {
+    try {
+      // Always write to global file so all workspaces stay in sync
+      const globalPath = this.getGlobalModeFilePath();
+      fs.writeFileSync(globalPath, mode, 'utf8');
+
+      // Also sync to workspace .agents/companion-mode if directory exists
+      const cwdPath = path.resolve(process.cwd(), '.agents/companion-mode');
+      if (fs.existsSync(path.dirname(cwdPath))) {
+        fs.writeFileSync(cwdPath, mode, 'utf8');
+      }
+
+      console.log(`[WsGateway] Mode set to: ${mode} (saved globally to ${globalPath})`);
+      this.broadcast({
+        type: 'server:mode_updated',
+        mode,
+      });
+    } catch (err) {
+      console.error('[WsGateway] Failed to save mode:', err);
+    }
   }
 
   private setupIdeWatcher(): void {
@@ -140,8 +185,39 @@ export class WsGateway {
               version: '0.1.0',
               workspacesCount: this.workspaceManager.listWorkspaces().length,
               pendingApprovals: this.hookIpc.getPendingRequests().length,
+              mode: this.getMode(),
             })
           );
+          return;
+        }
+
+        if (url === '/api/mode' && req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ mode: this.getMode() }));
+          return;
+        }
+
+        if (url === '/api/mode' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => {
+            body += chunk;
+          });
+          req.on('end', () => {
+            try {
+              const data = JSON.parse(body);
+              if (data.mode === 'desk' || data.mode === 'remote') {
+                this.setMode(data.mode);
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, mode: data.mode }));
+              } else {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Mode must be desk or remote' }));
+              }
+            } catch (err: any) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
           return;
         }
 
@@ -159,11 +235,13 @@ export class WsGateway {
       this.wss.on('connection', (ws: WebSocket) => {
         this.clients.add(ws);
 
-        // Send initial state on connection
+        // Send initial state & full conversation history on connection
         const helloMsg: WsServerMessage = {
           type: 'server:hello',
           daemonVersion: '0.1.0',
           workspaces: this.workspaceManager.listWorkspaces(),
+          history: this.ideWatcher.getHistory(),
+          mode: this.getMode(),
         };
         ws.send(JSON.stringify(helloMsg));
 
@@ -202,6 +280,12 @@ export class WsGateway {
 
       case 'client:respond_approval':
         this.hookIpc.resolveApproval(msg.payload);
+        break;
+
+      case 'client:set_mode':
+        if (msg.mode === 'desk' || msg.mode === 'remote') {
+          this.setMode(msg.mode);
+        }
         break;
 
       case 'client:list_workspaces':

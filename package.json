@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspace=@agy-companion/protocol && npm run build --workspace=@agy-companion/cli && npm run build --workspace=@agy-companion/web",
     "dev:cli": "npm run dev --workspace=@agy-companion/cli",
     "dev:web": "npm run dev --workspace=@agy-companion/web",
     "start": "npm run start --workspace=@agy-companion/cli"
