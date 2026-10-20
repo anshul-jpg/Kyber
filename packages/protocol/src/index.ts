@@ -59,17 +59,27 @@ export interface ChatMessage {
   thought?: string;
   toolCall?: ToolCallData;
   toolResult?: any;
+  imageUrl?: string;
+  images?: string[];
 }
 
 // WebSocket message envelope
 export type WsClientMessage =
   | { type: 'client:hello'; deviceId: string; name?: string }
   | { type: 'client:respond_approval'; payload: ApprovalDecisionPayload }
-  | { type: 'client:send_prompt'; workspaceId: string; prompt: string }
+  | {
+      type: 'client:send_prompt';
+      workspaceId: string;
+      prompt: string;
+      imageBase64?: string;
+      imageName?: string;
+      images?: { base64: string; name: string }[];
+    }
   | { type: 'client:switch_workspace'; workspaceId: string }
   | { type: 'client:register_workspace'; path: string }
   | { type: 'client:set_mode'; mode: 'desk' | 'remote' }
-  | { type: 'client:list_workspaces' };
+  | { type: 'client:list_workspaces' }
+  | { type: 'client:ping' };
 
 export type WsServerMessage =
   | { type: 'server:hello'; daemonVersion: string; workspaces: WorkspaceState[]; history?: ChatMessage[]; mode?: 'desk' | 'remote' }
@@ -81,7 +91,8 @@ export type WsServerMessage =
   | { type: 'server:chat_message'; workspaceId: string; message: ChatMessage }
   | { type: 'server:history'; workspaceId: string; messages: ChatMessage[] }
   | { type: 'server:status_change'; workspaceId: string; status: WorkspaceStatus }
-  | { type: 'server:mode_updated'; mode: 'desk' | 'remote' };
+  | { type: 'server:mode_updated'; mode: 'desk' | 'remote' }
+  | { type: 'server:pong'; timestamp?: number };
 
 export const DEFAULT_DAEMON_PORT = 4040;
 export const HOOK_IPC_PORT = 4041;

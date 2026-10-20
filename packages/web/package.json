@@ -10,7 +10,12 @@
   },
   "dependencies": {
     "@agy-companion/protocol": "^0.1.0",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/local-notifications": "^8.3.1",
     "lucide-react": "^1.16.0",
+    "marked": "^18.1.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

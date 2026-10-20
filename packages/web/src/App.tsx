@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   ApprovalRequest,
   GitFileChange,
@@ -12,28 +12,36 @@ import {
   Terminal,
   FileCode,
   Search,
-  Wrench,
   Check,
   X,
   ChevronDown,
   ChevronRight,
   Copy,
   CheckCheck,
-  ShieldAlert,
-  Zap,
   Settings,
   Send,
-  Sparkles,
   Folder,
   Plus,
-  History,
-  MoreHorizontal,
   Laptop,
   Smartphone,
+  CheckCircle2,
+  AlertCircle,
+  Clock,
+  Sparkles,
+  Image as ImageIcon,
+  Wifi,
+  Globe,
+  Bell,
 } from 'lucide-react';
+import { marked } from 'marked';
+import {
+  dispatchApprovalNotification,
+  requestNotificationPermission,
+  initNotificationActions,
+} from './utils/notifications';
 
-// --- Micro-helpers & Tactile Feedback ---
-const triggerHaptic = (pattern: number | number[] = 40) => {
+// --- Haptic Feedback Helper ---
+const triggerHaptic = (pattern: number | number[] = 30) => {
   if (typeof window !== 'undefined' && 'vibrate' in navigator) {
     try {
       navigator.vibrate(pattern);
@@ -41,7 +49,7 @@ const triggerHaptic = (pattern: number | number[] = 40) => {
   }
 };
 
-// --- Copy to Clipboard Button ---
+// --- Copy Button ---
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
@@ -49,7 +57,7 @@ function CopyButton({ text }: { text: string }) {
     e.stopPropagation();
     navigator.clipboard.writeText(text);
     setCopied(true);
-    triggerHaptic(30);
+    triggerHaptic(20);
     setTimeout(() => setCopied(false), 2000);
   };
 
@@ -58,17 +66,16 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       title="Copy"
       style={{
-        background: 'rgba(255, 255, 255, 0.06)',
+        background: 'rgba(255, 255, 255, 0.05)',
         border: '1px solid rgba(255, 255, 255, 0.1)',
-        borderRadius: '6px',
-        color: copied ? '#34d399' : '#94a3b8',
+        borderRadius: '4px',
+        color: copied ? '#4ade80' : '#9ca3af',
         padding: '3px 7px',
         display: 'inline-flex',
         alignItems: 'center',
         gap: '4px',
         fontSize: '11px',
         cursor: 'pointer',
-        transition: 'all 0.15s ease',
       }}
     >
       {copied ? <CheckCheck size={12} /> : <Copy size={12} />}
@@ -77,463 +84,166 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-// --- Exact Antigravity IDE Tool Activity Row (1-1 Match) ---
-function ToolCallPill({ toolCall, summary }: { toolCall?: ToolCallData; summary: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const name = toolCall?.name || 'tool';
-  const args = toolCall?.args || {};
-
-  // 1. File Edit Tools (replace_file_content, write_to_file, multi_replace_file_content)
-  if (name === 'replace_file_content' || name === 'write_to_file' || name === 'multi_replace_file_content') {
-    const filePath = (args.TargetFile || args.AbsolutePath || '').replace(/\\/g, '/');
-    const fileName = filePath ? filePath.split('/').pop() : 'file';
-    const ext = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : '';
-
-    let badge = 'FILE';
-    let badgeColor = '#94a3b8';
-    let badgeBg = 'rgba(148, 163, 184, 0.15)';
-
-    if (ext === 'ts') {
-      badge = 'TS';
-      badgeColor = '#3b82f6';
-      badgeBg = 'rgba(59, 130, 246, 0.18)';
-    } else if (ext === 'tsx') {
-      badge = '⚛️';
-      badgeColor = '#38bdf8';
-      badgeBg = 'rgba(56, 189, 248, 0.18)';
-    } else if (ext === 'js' || ext === 'mjs' || ext === 'cjs') {
-      badge = 'JS';
-      badgeColor = '#facc15';
-      badgeBg = 'rgba(250, 204, 21, 0.18)';
-    } else if (ext === 'json') {
-      badge = '{}';
-      badgeColor = '#fbbf24';
-      badgeBg = 'rgba(251, 191, 36, 0.18)';
-    } else if (ext === 'xml' || ext === 'html') {
-      badge = '<>';
-      badgeColor = '#34d399';
-      badgeBg = 'rgba(52, 211, 153, 0.18)';
+// --- High-Fidelity Markdown Formatter (Anti-Clipping & Clean Typography) ---
+function MarkdownContent({ content }: { content: string }) {
+  const html = useMemo(() => {
+    try {
+      return marked.parse(content, { gfm: true, breaks: true }) as string;
+    } catch {
+      return content;
     }
-
-    const newLines = (args.ReplacementContent || '').split('\n').length;
-    const oldLines = (args.TargetContent || '').split('\n').length;
-    const ins = Math.max(1, newLines);
-    const del = Math.max(0, oldLines);
-
-    return (
-      <div style={{ margin: '3px 0' }}>
-        <div
-          onClick={() => {
-            setExpanded(!expanded);
-            triggerHaptic(20);
-          }}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '13px',
-            color: '#a1a1aa',
-            cursor: 'pointer',
-            padding: '2px 4px',
-            borderRadius: '4px',
-            userSelect: 'none',
-          }}
-        >
-          <span>Edited</span>
-          <span
-            style={{
-              fontSize: '10px',
-              fontWeight: 700,
-              padding: '1px 5px',
-              borderRadius: '3px',
-              background: badgeBg,
-              color: badgeColor,
-            }}
-          >
-            {badge}
-          </span>
-          <span style={{ color: '#f4f4f5', fontWeight: 500 }}>{fileName}</span>
-          <span style={{ color: '#22c55e', fontSize: '11.5px', fontWeight: 600 }}>+{ins}</span>
-          <span style={{ color: '#ef4444', fontSize: '11.5px', fontWeight: 600 }}>-{del}</span>
-          <ChevronRight
-            size={12}
-            color="#71717a"
-            style={{
-              transform: expanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform 0.15s ease',
-            }}
-          />
-        </div>
-
-        {expanded && (
-          <div
-            style={{
-              marginTop: '4px',
-              padding: '8px 12px',
-              background: '#0d1117',
-              borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              fontSize: '11.5px',
-              fontFamily: 'Geist Mono, monospace',
-              color: '#cbd5e1',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-              <span style={{ color: '#71717a' }}>{filePath}</span>
-              <CopyButton text={args.ReplacementContent || JSON.stringify(args, null, 2)} />
-            </div>
-            {args.Instruction && (
-              <div style={{ color: '#94a3b8', marginBottom: '4px' }}>{args.Instruction}</div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // 2. Command Execution Tools (run_command)
-  if (name === 'run_command') {
-    const cmd = args.CommandLine || summary || 'command';
-    return (
-      <div style={{ margin: '3px 0' }}>
-        <div
-          onClick={() => {
-            setExpanded(!expanded);
-            triggerHaptic(20);
-          }}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontSize: '13px',
-            color: '#a1a1aa',
-            cursor: 'pointer',
-            padding: '2px 4px',
-            borderRadius: '4px',
-            userSelect: 'none',
-          }}
-        >
-          <span>{expanded ? `Run ${cmd}?` : `Ran ${cmd}`}</span>
-          <ChevronRight
-            size={12}
-            color="#71717a"
-            style={{
-              transform: expanded ? 'rotate(90deg)' : 'none',
-              transition: 'transform 0.15s ease',
-            }}
-          />
-        </div>
-
-        {expanded && (
-          <div
-            style={{
-              marginTop: '4px',
-              padding: '8px 12px',
-              background: '#0d1117',
-              borderRadius: '6px',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              fontSize: '12px',
-              fontFamily: 'Geist Mono, monospace',
-              color: '#e2e8f0',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ color: '#71717a' }}>..\\antigravity compainion &gt; {cmd}</span>
-              <CopyButton text={cmd} />
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // 3. Exploration Tools (view_file, list_dir, grep_search)
-  const isSearch = name === 'grep_search';
-  const label = isSearch ? `Explored 1 search` : `Explored 1 file`;
+  }, [content]);
 
   return (
-    <div style={{ margin: '3px 0' }}>
-      <div
-        onClick={() => {
-          setExpanded(!expanded);
-          triggerHaptic(20);
-        }}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          fontSize: '13px',
-          color: '#a1a1aa',
-          cursor: 'pointer',
-          padding: '2px 4px',
-          borderRadius: '4px',
-          userSelect: 'none',
-        }}
-      >
-        <span>{label}</span>
-        <ChevronRight
-          size={12}
-          color="#71717a"
-          style={{
-            transform: expanded ? 'rotate(90deg)' : 'none',
-            transition: 'transform 0.15s ease',
-          }}
-        />
-      </div>
-
-      {expanded && (
-        <div
-          style={{
-            marginTop: '4px',
-            padding: '8px 12px',
-            background: '#0d1117',
-            borderRadius: '6px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            fontSize: '11.5px',
-            fontFamily: 'Geist Mono, monospace',
-            color: '#cbd5e1',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-            <span style={{ color: '#71717a' }}>
-              {args.AbsolutePath || args.SearchPath || args.Query || summary}
-            </span>
-            <CopyButton text={JSON.stringify(args, null, 2)} />
-          </div>
-        </div>
-      )}
-    </div>
+    <div
+      className="prose-antigravity"
+      dangerouslySetInnerHTML={{ __html: html }}
+      style={{
+        color: '#e2e8f0',
+        fontSize: '13.5px',
+        lineHeight: '1.6',
+        wordBreak: 'break-word',
+        overflowWrap: 'anywhere',
+      }}
+    />
   );
 }
 
-// --- Thought Process Accordion (Exact IDE "Thought for 1s >") ---
-function ThinkingAccordion({ thought }: { thought: string }) {
+// --- Activity Row (Matches Antigravity IDE Screenshot) ---
+function ActivityRow({
+  icon: Icon,
+  title,
+  subtitle,
+  children,
+}: {
+  icon: any;
+  title: string;
+  subtitle?: string;
+  children?: React.ReactNode;
+}) {
   const [open, setOpen] = useState(false);
-  if (!thought) return null;
 
   return (
-    <div style={{ margin: '3px 0' }}>
-      <div
-        onClick={() => {
-          setOpen(!open);
-          triggerHaptic(20);
-        }}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxWidth: '100%', minWidth: 0, width: '100%', boxSizing: 'border-box' }}>
+      <button
+        onClick={() => setOpen(!open)}
         style={{
-          display: 'inline-flex',
+          background: '#222222',
+          border: '1px solid #2e2e2e',
+          borderRadius: '6px',
+          padding: '6px 10px',
+          display: 'flex',
           alignItems: 'center',
-          gap: '6px',
+          gap: '7px',
+          fontSize: '12px',
           color: '#a1a1aa',
-          fontSize: '13px',
           cursor: 'pointer',
-          padding: '2px 4px',
-          borderRadius: '4px',
-          userSelect: 'none',
+          textAlign: 'left',
+          width: 'fit-content',
+          maxWidth: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box',
         }}
       >
-        <span>Thought for 1s</span>
+        <Icon size={13} color="#9ca3af" style={{ flexShrink: 0 }} />
+        <span style={{ fontWeight: 500, color: '#e2e8f0', flexShrink: 0 }}>{title}</span>
+        {subtitle && (
+          <span
+            style={{
+              color: '#71717a',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              maxWidth: '220px',
+              minWidth: 0,
+            }}
+          >
+            {subtitle}
+          </span>
+        )}
         <ChevronRight
           size={12}
           color="#71717a"
           style={{
             transform: open ? 'rotate(90deg)' : 'none',
             transition: 'transform 0.15s ease',
+            marginLeft: 'auto',
+            flexShrink: 0,
           }}
         />
-      </div>
+      </button>
 
-      {open && (
+      {open && children && (
         <div
           style={{
-            marginTop: '4px',
-            padding: '8px 12px',
+            background: '#141414',
+            border: '1px solid #2e2e2e',
             borderRadius: '6px',
-            background: 'rgba(255, 255, 255, 0.03)',
-            border: '1px solid rgba(255, 255, 255, 0.06)',
+            padding: '10px 12px',
             fontSize: '12px',
-            lineHeight: '1.5',
-            color: '#a1a1aa',
-            fontStyle: 'italic',
-            whiteSpace: 'pre-wrap',
-            maxHeight: '200px',
-            overflowY: 'auto',
+            fontFamily: 'monospace',
+            color: '#d4d4d8',
+            overflowX: 'auto',
+            maxWidth: '100%',
+            maxHeight: '260px',
+            marginTop: '2px',
+            boxSizing: 'border-box',
           }}
         >
-          {thought}
+          {children}
         </div>
       )}
     </div>
   );
 }
 
-// --- Clean Markdown Text Formatter ---
-function FormattedMessage({ text }: { text: string }) {
-  if (!text) return null;
-
-  // Split text into code blocks and normal paragraphs
-  const parts = text.split(/(```[\s\S]*?```)/g);
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-      {parts.map((part, idx) => {
-        if (part.startsWith('```') && part.endsWith('```')) {
-          const lines = part.slice(3, -3).trim().split('\n');
-          const firstLine = lines[0].trim();
-          const hasLang = !firstLine.includes(' ') && firstLine.length > 0 && lines.length > 1;
-          const lang = hasLang ? firstLine : '';
-          const code = (hasLang ? lines.slice(1) : lines).join('\n');
-
-          return (
-            <div
-              key={idx}
-              style={{
-                borderRadius: '8px',
-                background: '#070b14',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                overflow: 'hidden',
-                margin: '4px 0',
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '5px 10px',
-                  background: 'rgba(255, 255, 255, 0.03)',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
-                  fontSize: '11px',
-                  color: '#64748b',
-                  fontFamily: 'monospace',
-                }}
-              >
-                <span>{lang || 'code'}</span>
-                <CopyButton text={code} />
-              </div>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: '10px 12px',
-                  fontSize: '12px',
-                  lineHeight: '1.45',
-                  color: '#e2e8f0',
-                  fontFamily: 'Geist Mono, Fira Code, monospace',
-                  overflowX: 'auto',
-                  whiteSpace: 'pre',
-                }}
-              >
-                {code}
-              </pre>
-            </div>
-          );
-        }
-
-        // Paragraphs, headers, and bullet formatting
-        const paragraphs = part.split('\n\n').filter(p => p.trim());
-        return paragraphs.map((p, pIdx) => {
-          const trimmed = p.trim();
-          if (trimmed.startsWith('### ')) {
-            return (
-              <h3 key={`${idx}-${pIdx}`} style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc', margin: '4px 0 2px 0' }}>
-                {trimmed.replace(/^###\s+/, '')}
-              </h3>
-            );
-          }
-          if (trimmed.startsWith('## ')) {
-            return (
-              <h2 key={`${idx}-${pIdx}`} style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', margin: '6px 0 2px 0' }}>
-                {trimmed.replace(/^##\s+/, '')}
-              </h2>
-            );
-          }
-          if (trimmed.startsWith('# ')) {
-            return (
-              <h1 key={`${idx}-${pIdx}`} style={{ fontSize: '16px', fontWeight: 800, color: '#f8fafc', margin: '8px 0 4px 0' }}>
-                {trimmed.replace(/^#\s+/, '')}
-              </h1>
-            );
-          }
-
-          // Format inline bold and code
-          const formattedLines = p.split('\n').map((line, lIdx) => {
-            const isBullet = line.trim().startsWith('- ') || line.trim().startsWith('* ');
-            const lineContent = isBullet ? line.trim().substring(2) : line;
-
-            return (
-              <div key={lIdx} style={{ display: isBullet ? 'flex' : 'block', gap: '6px', margin: '2px 0' }}>
-                {isBullet && <span style={{ color: '#38bdf8' }}>•</span>}
-                <span>
-                  {lineContent.split(/(`[^`]+`|\*\*[^*]+\*\*)/g).map((chunk, cIdx) => {
-                    if (chunk.startsWith('`') && chunk.endsWith('`')) {
-                      return (
-                        <code
-                          key={cIdx}
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.08)',
-                            padding: '1px 5px',
-                            borderRadius: '4px',
-                            fontSize: '12px',
-                            fontFamily: 'Geist Mono, monospace',
-                            color: '#38bdf8',
-                          }}
-                        >
-                          {chunk.slice(1, -1)}
-                        </code>
-                      );
-                    }
-                    if (chunk.startsWith('**') && chunk.endsWith('**')) {
-                      return (
-                        <strong key={cIdx} style={{ fontWeight: 700, color: '#f8fafc' }}>
-                          {chunk.slice(2, -2)}
-                        </strong>
-                      );
-                    }
-                    return chunk;
-                  })}
-                </span>
-              </div>
-            );
-          });
-
-          return (
-            <div key={`${idx}-${pIdx}`} style={{ fontSize: '13px', lineHeight: '1.6', color: '#cbd5e1' }}>
-              {formattedLines}
-            </div>
-          );
-        });
-      })}
-    </div>
-  );
-}
-
-// --- Main App Component ---
 export default function App() {
   const [host, setHost] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('host') || localStorage.getItem('agy_host') || window.location.hostname || '127.0.0.1';
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const urlHost = p.get('host');
+      if (urlHost) return urlHost;
+      const saved = localStorage.getItem('agy_host');
+      if (saved) return saved;
+      // In Capacitor Android, window.location.hostname is localhost, so default to PC Wi-Fi IP
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return '192.168.1.37';
+      }
+      return window.location.hostname || '192.168.1.37';
+    }
+    return '192.168.1.37';
   });
+
   const [port, setPort] = useState<string>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('port') || localStorage.getItem('agy_port') || '4040';
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      return p.get('port') || localStorage.getItem('agy_port') || (window.location.port ? window.location.port : '4040');
+    }
+    return '4040';
   });
 
   const [connected, setConnected] = useState<boolean>(false);
   const [workspaces, setWorkspaces] = useState<WorkspaceState[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>('');
-  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
-  const [interceptInput, setInterceptInput] = useState<{ [reqId: string]: string }>({});
-  const [showInterceptBox, setShowInterceptBox] = useState<{ [reqId: string]: boolean }>({});
-  const [selectedOptions, setSelectedOptions] = useState<{ [reqId: string]: number }>({});
-  const [option4Inputs, setOption4Inputs] = useState<{ [reqId: string]: string }>({});
-  const [showFileChanges, setShowFileChanges] = useState<{ [reqId: string]: boolean }>({});
-  const [promptText, setPromptText] = useState<string>('');
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const cached = localStorage.getItem('agy_cached_chat');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const wsParam = p.get('ws');
+      if (wsParam) {
+        try {
+          return atob(wsParam);
+        } catch {
+          return wsParam;
+        }
+      }
     }
+    return '';
   });
+
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [promptText, setPromptText] = useState<string>('');
+  const [selectedOptions, setSelectedOptions] = useState<Record<string, number>>({});
+  const [option4Inputs, setOption4Inputs] = useState<Record<string, string>>({});
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [showProjectDrawer, setShowProjectDrawer] = useState<boolean>(false);
@@ -541,65 +251,43 @@ export default function App() {
   const [companionMode, setCompanionMode] = useState<'desk' | 'remote'>('remote');
   const [customHost, setCustomHost] = useState(host);
   const [customPort, setCustomPort] = useState(port);
+  const [reconnectTick, setReconnectTick] = useState<number>(0);
+  const [notificationTestStatus, setNotificationTestStatus] = useState<string>('');
+
+  // Multi-image upload state
+  const [attachedImages, setAttachedImages] = useState<{ base64: string; name: string; preview: string }[]>([]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const switchWorkspace = (wsId: string) => {
-    setActiveWorkspaceId(wsId);
-    triggerHaptic(30);
-    setShowProjectDrawer(false);
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'client:switch_workspace',
-          workspaceId: wsId,
-        })
-      );
-    }
-  };
-
-  const registerNewWorkspace = (dirPath: string) => {
-    if (!dirPath.trim()) return;
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(
-        JSON.stringify({
-          type: 'client:register_workspace',
-          path: dirPath.trim(),
-        })
-      );
-      setNewProjectPath('');
-      triggerHaptic([40, 30, 40]);
-    }
-  };
-
-  useEffect(() => {
-    if (chatMessages.length > 0) {
-      try {
-        localStorage.setItem('agy_cached_chat', JSON.stringify(chatMessages.slice(-60)));
-      } catch {}
-    }
-  }, [chatMessages]);
+  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages, isStreaming]);
+  }, [chatMessages, isStreaming, pendingApprovals]);
 
+  // Connect WebSocket
   useEffect(() => {
     localStorage.setItem('agy_host', host);
     localStorage.setItem('agy_port', port);
 
-    const isHttps = window.location.protocol === 'https:';
-    let wsUrl: string;
-    if (isHttps) {
-      // Behind Cloudflare or HTTPS reverse proxy: use WSS on same host
+    let wsUrl = '';
+    const cleanHost = (host || '').trim().replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+    if (cleanHost.includes('.trycloudflare.com')) {
+      wsUrl = `wss://${cleanHost}`;
+    } else if (window.location.protocol === 'https:' && window.location.hostname.includes('.trycloudflare.com')) {
       wsUrl = `wss://${window.location.host}`;
     } else {
-      wsUrl = `ws://${host}:${port || '4040'}`;
+      // Direct IP / Local LAN connection
+      const targetHost = cleanHost || '192.168.1.37';
+      wsUrl = `ws://${targetHost}:${port || '4040'}`;
     }
 
-    let socket: WebSocket;
+    console.log('[Companion] Connecting to:', wsUrl);
 
+    let socket: WebSocket;
     try {
       socket = new WebSocket(wsUrl);
       wsRef.current = socket;
@@ -610,11 +298,11 @@ export default function App() {
 
     socket.onopen = () => {
       setConnected(true);
-      triggerHaptic(60);
+      triggerHaptic(40);
       const hello: WsClientMessage = {
         type: 'client:hello',
-        deviceId: 'companion-mobile-client',
-        name: navigator.userAgent.includes('Android') ? 'Android Phone' : 'Mobile Web',
+        deviceId: 'companion-client',
+        name: navigator.userAgent.includes('Android') ? 'Android APK' : 'Mobile Web',
       };
       socket.send(JSON.stringify(hello));
     };
@@ -636,12 +324,11 @@ export default function App() {
             }
             const initialApprovals = msg.workspaces.flatMap(w => w.pendingApprovals || []);
             setPendingApprovals(initialApprovals);
-            if (initialApprovals.length > 0) triggerHaptic([200, 100, 200]);
             break;
 
           case 'server:mode_updated':
             setCompanionMode(msg.mode);
-            triggerHaptic(40);
+            triggerHaptic(30);
             break;
 
           case 'server:history':
@@ -652,8 +339,7 @@ export default function App() {
 
           case 'server:workspaces_updated':
             setWorkspaces(msg.workspaces);
-            const allApprovals = msg.workspaces.flatMap(w => w.pendingApprovals || []);
-            setPendingApprovals(allApprovals);
+            setPendingApprovals(msg.workspaces.flatMap(w => w.pendingApprovals || []));
             break;
 
           case 'server:approval_requested':
@@ -661,12 +347,17 @@ export default function App() {
               if (prev.some(r => r.id === msg.request.id)) return prev;
               return [...prev, msg.request];
             });
-            triggerHaptic([200, 100, 200, 100, 300]);
+            triggerHaptic([200, 100, 200]);
+            dispatchApprovalNotification(
+              msg.request.toolCall?.name || 'Tool Approval',
+              msg.request.toolCall?.args?.CommandLine || JSON.stringify(msg.request.toolCall?.args || {}),
+              msg.request.id
+            );
             break;
 
           case 'server:approval_resolved':
             setPendingApprovals(prev => prev.filter(r => r.id !== msg.requestId));
-            triggerHaptic(40);
+            triggerHaptic(30);
             break;
 
           case 'server:chat_message':
@@ -710,17 +401,44 @@ export default function App() {
     socket.onclose = () => {
       setConnected(false);
       wsRef.current = null;
+      // Auto-reconnect after 2 seconds on mobile connection drop
+      setTimeout(() => {
+        setReconnectTick(t => t + 1);
+      }, 2000);
     };
 
     socket.onerror = () => {
       setConnected(false);
+      try {
+        socket.close();
+      } catch {}
     };
+
+    // Keep-alive heartbeat: ping daemon every 15s to keep mobile connection awake
+    const pingInterval = setInterval(() => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'client:ping' }));
+      }
+    }, 15000);
+
+    // Auto-reconnect when device comes back online or screen is unlocked
+    const handleWake = () => {
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        setReconnectTick(t => t + 1);
+      }
+    };
+    window.addEventListener('online', handleWake);
+    document.addEventListener('visibilitychange', handleWake);
 
     return () => {
+      clearInterval(pingInterval);
+      window.removeEventListener('online', handleWake);
+      document.removeEventListener('visibilitychange', handleWake);
       socket.close();
     };
-  }, [host, port]);
+  }, [host, port, reconnectTick]);
 
+  // Send approval decision
   const sendDecision = (
     requestId: string,
     decision: 'allow' | 'deny',
@@ -728,7 +446,7 @@ export default function App() {
     customText: string = ''
   ) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    triggerHaptic(50);
+    triggerHaptic(40);
 
     const payload: WsClientMessage = {
       type: 'client:respond_approval',
@@ -736,7 +454,7 @@ export default function App() {
         requestId,
         decision,
         selectedOption,
-        reason: selectedOption === 4 ? customText : (decision === 'deny' ? 'Skipped by user' : undefined),
+        reason: selectedOption === 4 ? customText : decision === 'deny' ? 'Skipped by user' : undefined,
         interceptPrompt: customText,
       },
     };
@@ -745,232 +463,312 @@ export default function App() {
     setPendingApprovals(prev => prev.filter(r => r.id !== requestId));
   };
 
+  // Wire lockscreen & notification action buttons to sendDecision directly
+  useEffect(() => {
+    initNotificationActions((actionId, reqId) => {
+      if (reqId) {
+        if (actionId === 'approve') {
+          sendDecision(reqId, 'allow', 1);
+        } else if (actionId === 'deny') {
+          sendDecision(reqId, 'deny', 0, 'Rejected from notification');
+        }
+      }
+    });
+    requestNotificationPermission();
+  }, []);
+
+  // Multi-image selection handler
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const res = reader.result as string;
+        const base64 = res.includes(',') ? res.split(',')[1] : res;
+        setAttachedImages(prev => [
+          ...prev,
+          {
+            base64,
+            name: file.name,
+            preview: res,
+          },
+        ]);
+        triggerHaptic(20);
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  };
+
+  // Send user prompt (with multiple images support)
   const sendPrompt = () => {
     const text = promptText.trim();
-    if (!text || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-    triggerHaptic(40);
+    if (!text && attachedImages.length === 0) return;
+    if (isStreaming) return;
+
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      alert('Connecting to companion daemon... Please try again in 1-2 seconds.');
+      setReconnectTick(t => t + 1);
+      return;
+    }
+    triggerHaptic(30);
 
     const wsMsg: WsClientMessage = {
       type: 'client:send_prompt',
       workspaceId: activeWorkspaceId,
-      prompt: text,
+      prompt: text || (attachedImages.length > 0 ? 'Attached photos from mobile companion' : ''),
+      images: attachedImages.map(img => ({ base64: img.base64, name: img.name })),
+      imageBase64: attachedImages[0]?.base64,
+      imageName: attachedImages[0]?.name,
     };
 
     wsRef.current.send(JSON.stringify(wsMsg));
     setPromptText('');
+    setAttachedImages([]);
   };
 
+  // Switch Desk/Remote mode
   const toggleMode = (newMode: 'desk' | 'remote') => {
     setCompanionMode(newMode);
-    triggerHaptic(40);
+    triggerHaptic(30);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'client:set_mode', mode: newMode }));
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'client:set_mode',
+          mode: newMode,
+        })
+      );
     }
-    fetch(`http://${host}:${port}/api/mode`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: newMode }),
-    }).catch(() => {});
   };
 
-  const activeWorkspace = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
+  const switchWorkspace = (wsId: string) => {
+    setActiveWorkspaceId(wsId);
+    triggerHaptic(30);
+    setShowProjectDrawer(false);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'client:switch_workspace',
+          workspaceId: wsId,
+        })
+      );
+    }
+  };
+
+  const registerNewWorkspace = (dirPath: string) => {
+    if (!dirPath.trim()) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'client:register_workspace',
+          path: dirPath.trim(),
+        })
+      );
+      setNewProjectPath('');
+      triggerHaptic(30);
+    }
+  };
 
   return (
     <div
       style={{
-        maxWidth: '680px',
-        margin: '0 auto',
-        minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        background: '#141416',
-        color: '#f4f4f5',
+        height: '100%',
+        width: '100%',
+        background: '#181818',
+        color: '#e2e8f0',
         position: 'relative',
-        paddingBottom: '115px',
+        overflow: 'hidden',
       }}
     >
-      {/* Exact Desktop IDE Top Bar */}
+      {/* Global CSS for Markdown & Typography */}
+      <style>{`
+        .prose-antigravity h1, .prose-antigravity h2, .prose-antigravity h3, .prose-antigravity h4 {
+          color: #f8fafc;
+          font-weight: 700;
+          margin: 12px 0 6px 0;
+          line-height: 1.35;
+        }
+        .prose-antigravity h1 { font-size: 17px; }
+        .prose-antigravity h2 { font-size: 15.5px; }
+        .prose-antigravity h3 { font-size: 14.5px; }
+        .prose-antigravity p {
+          margin: 6px 0;
+        }
+        .prose-antigravity ul, .prose-antigravity ol {
+          padding-left: 18px;
+          margin: 6px 0;
+        }
+        .prose-antigravity li {
+          margin: 3px 0;
+        }
+        .prose-antigravity strong {
+          color: #ffffff;
+          font-weight: 600;
+        }
+        .prose-antigravity code:not(pre code) {
+          background: #27272a;
+          color: #f4f4f5;
+          padding: 2px 5px;
+          border-radius: 4px;
+          font-family: monospace;
+          font-size: 12px;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .prose-antigravity pre {
+          background: #141414;
+          border: 1px solid #2e2e2e;
+          border-radius: 6px;
+          padding: 10px 12px;
+          overflow-x: auto;
+          margin: 8px 0;
+        }
+        .prose-antigravity pre code {
+          color: #d4d4d8;
+          font-family: monospace;
+          font-size: 12px;
+        }
+        .prose-antigravity hr {
+          border: none;
+          border-top: 1px solid #2e2e2e;
+          margin: 14px 0;
+        }
+        .prose-antigravity a {
+          color: #38bdf8;
+          text-decoration: none;
+        }
+        .prose-antigravity a:hover {
+          text-decoration: underline;
+        }
+      `}</style>
+
+      {/* --- Top Navigation Header (Safe-Area Aware & Ergonomic) --- */}
       <header
         style={{
-          position: 'sticky',
-          top: 0,
-          zIndex: 50,
-          background: '#18181b',
+          background: '#141414',
           borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: '10px 16px',
           display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingTop: 'max(env(safe-area-inset-top, 0px), 8px)',
+          paddingBottom: '8px',
+          paddingLeft: 'max(14px, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(14px, env(safe-area-inset-right, 0px))',
+          minHeight: 'calc(52px + max(env(safe-area-inset-top, 0px), 0px))',
+          boxSizing: 'border-box',
+          zIndex: 30,
+          flexShrink: 0,
+          width: '100%',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
-            onClick={() => {
-              setShowProjectDrawer(true);
-              triggerHaptic(20);
-            }}
-            title="Switch Workspace / Project"
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
-              borderRadius: '7px',
-              padding: '4px 8px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              color: '#f4f4f5',
-              fontSize: '13px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              letterSpacing: '-0.01em',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Folder size={13} color="#38bdf8" />
-            <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeWorkspace ? activeWorkspace.name : 'antigravity companion'}
-            </span>
-            <ChevronDown size={12} color="#94a3b8" />
-          </button>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {/* Desk / Remote Mode Pill */}
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              background: '#090d16',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              borderRadius: '7px',
-              padding: '2px',
-              gap: '2px',
-            }}
-          >
-            <button
-              onClick={() => toggleMode('desk')}
-              title="Desk Mode: Approvals appear directly in PC IDE terminal (zero phone blocking)"
-              style={{
-                border: 'none',
-                borderRadius: '5px',
-                padding: '3px 7px',
-                background: companionMode === 'desk' ? '#2563eb' : 'transparent',
-                color: companionMode === 'desk' ? '#ffffff' : '#71717a',
-                fontSize: '11px',
-                fontWeight: companionMode === 'desk' ? 600 : 500,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Laptop size={12} />
-              <span>Desk</span>
-            </button>
-            <button
-              onClick={() => toggleMode('remote')}
-              title="Remote Mode: Approvals pushed to Phone (1-tap approve away from PC)"
-              style={{
-                border: 'none',
-                borderRadius: '5px',
-                padding: '3px 7px',
-                background: companionMode === 'remote' ? '#10b981' : 'transparent',
-                color: companionMode === 'remote' ? '#ffffff' : '#71717a',
-                fontSize: '11px',
-                fontWeight: companionMode === 'remote' ? 600 : 500,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <Smartphone size={12} />
-              <span>Remote</span>
-            </button>
-          </div>
-
-          {/* New Chat (+) */}
-          <button
-            onClick={() => {
-              if (confirm('Start a new session?')) {
-                setChatMessages([]);
-                localStorage.removeItem('agy_cached_chat');
-              }
-            }}
-            title="New Chat"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#a1a1aa',
-              cursor: 'pointer',
-              padding: '2px',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <Plus size={16} />
-          </button>
-
-          {/* History */}
-          <button
-            onClick={() => alert('Recent conversations tracked via Antigravity session watcher')}
-            title="History"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#a1a1aa',
-              cursor: 'pointer',
-              padding: '2px',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <History size={16} />
-          </button>
-
-          {/* Options Menu (...) */}
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            title="Settings"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#a1a1aa',
-              cursor: 'pointer',
-              padding: '2px',
-              display: 'flex',
-              alignItems: 'center',
-            }}
-          >
-            <MoreHorizontal size={16} />
-          </button>
-
-          {/* Connected Dot */}
+        {/* Workspace Selector Button with Live Status Dot */}
+        <button
+          onClick={() => {
+            setShowProjectDrawer(true);
+            triggerHaptic(20);
+          }}
+          style={{
+            background: '#1e1e1e',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '8px',
+            color: '#f1f5f9',
+            padding: '6px 11px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '7px',
+            fontSize: '12.5px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            maxWidth: '155px',
+            minHeight: '36px',
+            boxSizing: 'border-box',
+          }}
+        >
           <span
-            title={connected ? 'PC Online' : 'Offline'}
             style={{
               width: '7px',
               height: '7px',
               borderRadius: '50%',
-              background: connected ? '#10b981' : '#ef4444',
-              boxShadow: connected ? '0 0 6px #10b981' : 'none',
+              background: connected ? '#10b981' : '#f59e0b',
+              boxShadow: connected ? '0 0 6px rgba(16, 185, 129, 0.4)' : 'none',
+              flexShrink: 0,
             }}
           />
+          <Folder size={13} color="#94a3b8" style={{ flexShrink: 0 }} />
+          <span
+            style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {activeWorkspace ? activeWorkspace.name : 'Workspace'}
+          </span>
+          <ChevronDown size={12} color="#64748b" style={{ flexShrink: 0 }} />
+        </button>
+
+        {/* Right Actions: Compact Mode Switcher + Settings */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {/* Quick-Flip Mode Button (Space-Efficient for Mobile) */}
+          <button
+            onClick={() => toggleMode(companionMode === 'remote' ? 'desk' : 'remote')}
+            title={`Active: ${companionMode === 'remote' ? 'Remote Mode (Phone Priority)' : 'Desk Mode (PC Priority)'}. Tap to switch.`}
+            style={{
+              background: companionMode === 'remote' ? '#007acc' : '#1e1e1e',
+              border: `1px solid ${companionMode === 'remote' ? '#38bdf8' : 'rgba(255, 255, 255, 0.1)'}`,
+              color: '#ffffff',
+              borderRadius: '8px',
+              padding: '6px 11px',
+              minHeight: '36px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              boxSizing: 'border-box',
+            }}
+          >
+            {companionMode === 'remote' ? <Smartphone size={13} /> : <Laptop size={13} />}
+            <span>{companionMode === 'remote' ? 'Remote' : 'Desk'}</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setShowSettings(true);
+              triggerHaptic(20);
+            }}
+            style={{
+              background: '#1e1e1e',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '8px',
+              color: '#94a3b8',
+              width: '36px',
+              height: '36px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxSizing: 'border-box',
+            }}
+          >
+            <Settings size={15} />
+          </button>
         </div>
       </header>
 
-      {/* Multi-Project Workspace Drawer */}
+      {/* --- Workspace Drawer (Slide-Over) --- */}
       {showProjectDrawer && (
         <div
           onClick={() => setShowProjectDrawer(false)}
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 100,
-            background: 'rgba(0, 0, 0, 0.7)',
-            backdropFilter: 'blur(4px)',
+            zIndex: 50,
+            background: 'rgba(0,0,0,0.6)',
             display: 'flex',
             justifyContent: 'flex-start',
           }}
@@ -979,63 +777,34 @@ export default function App() {
             onClick={e => e.stopPropagation()}
             style={{
               width: '85%',
-              maxWidth: '340px',
+              maxWidth: '320px',
               height: '100%',
-              background: '#090d16',
-              borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+              background: '#1e1e1e',
+              borderRight: '1px solid #2e2e2e',
               display: 'flex',
               flexDirection: 'column',
-              boxShadow: '10px 0 30px rgba(0, 0, 0, 0.6)',
+              boxShadow: '8px 0 24px rgba(0,0,0,0.5)',
             }}
           >
-            {/* Drawer Header */}
             <div
               style={{
-                padding: '16px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                padding: '14px 16px',
+                borderBottom: '1px solid #2e2e2e',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Folder size={18} color="#38bdf8" />
-                <span style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.01em' }}>
-                  Workspaces
-                </span>
-              </div>
+              <span style={{ fontSize: '13px', fontWeight: 700, color: '#ededed' }}>Workspaces</span>
               <button
                 onClick={() => setShowProjectDrawer(false)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#94a3b8',
-                  padding: '4px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                }}
+                style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer' }}
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
 
-            {/* Workspaces List */}
             <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 600,
-                  color: '#64748b',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  marginBottom: '8px',
-                  paddingLeft: '4px',
-                }}
-              >
-                Active Projects ({workspaces.length})
-              </div>
-
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {workspaces.map(ws => {
                   const isActive = ws.id === (activeWorkspace?.id || activeWorkspaceId);
@@ -1045,104 +814,61 @@ export default function App() {
                       onClick={() => switchWorkspace(ws.id)}
                       style={{
                         padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: isActive ? '#182238' : 'rgba(255, 255, 255, 0.03)',
-                        border: isActive ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.06)',
+                        borderRadius: '6px',
+                        background: isActive ? '#282828' : 'transparent',
+                        border: `1px solid ${isActive ? '#383838' : 'transparent'}`,
                         cursor: 'pointer',
                         display: 'flex',
-                        flexDirection: 'column',
-                        gap: '4px',
-                        transition: 'all 0.15s ease',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontSize: '13px', fontWeight: 600, color: isActive ? '#ffffff' : '#e2e8f0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <Folder size={14} color={isActive ? '#007acc' : '#888'} />
+                        <span style={{ fontSize: '13px', fontWeight: isActive ? 600 : 400, color: '#ededed' }}>
                           {ws.name}
                         </span>
-                        {isActive && (
-                          <span
-                            style={{
-                              fontSize: '10px',
-                              background: '#0284c7',
-                              color: '#ffffff',
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontWeight: 700,
-                            }}
-                          >
-                            ACTIVE
-                          </span>
-                        )}
                       </div>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          color: '#64748b',
-                          fontFamily: 'monospace',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {ws.path}
-                      </span>
+                      {isActive && <Check size={14} color="#007acc" />}
                     </div>
                   );
                 })}
               </div>
 
-              {/* Add Project Form */}
-              <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '16px' }}>
-                <div
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    color: '#64748b',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.05em',
-                    marginBottom: '8px',
-                    paddingLeft: '4px',
-                  }}
-                >
-                  Attach Workspace
+              {/* Add workspace folder */}
+              <div style={{ marginTop: '20px', borderTop: '1px solid #2e2e2e', paddingTop: '14px' }}>
+                <div style={{ fontSize: '11px', color: '#888', marginBottom: '8px', fontWeight: 600 }}>
+                  Add Workspace Folder
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', gap: '6px' }}>
                   <input
                     type="text"
                     value={newProjectPath}
                     onChange={e => setNewProjectPath(e.target.value)}
-                    placeholder="e.g. D:\CODE\my-tv-box"
+                    placeholder="D:\Path\To\Repo"
                     style={{
-                      background: '#040711',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      flex: 1,
+                      background: '#141414',
+                      border: '1px solid #333',
                       borderRadius: '6px',
-                      padding: '8px 10px',
+                      color: '#ededed',
+                      padding: '6px 10px',
                       fontSize: '12px',
-                      color: '#f8fafc',
-                      outline: 'none',
-                      fontFamily: 'monospace',
                     }}
                   />
                   <button
                     onClick={() => registerNewWorkspace(newProjectPath)}
-                    disabled={!newProjectPath.trim()}
                     style={{
-                      background: newProjectPath.trim() ? '#2563eb' : '#1e293b',
-                      color: newProjectPath.trim() ? '#ffffff' : '#64748b',
+                      background: '#007acc',
                       border: 'none',
                       borderRadius: '6px',
-                      padding: '8px',
+                      color: '#fff',
+                      padding: '6px 10px',
                       fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: newProjectPath.trim() ? 'pointer' : 'not-allowed',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '6px',
+                      cursor: 'pointer',
                     }}
                   >
-                    <Plus size={14} />
-                    <span>Attach Workspace</span>
+                    Add
                   </button>
                 </div>
               </div>
@@ -1151,702 +877,896 @@ export default function App() {
         </div>
       )}
 
-      {/* Settings Modal */}
+      {/* --- Settings Modal --- */}
       {showSettings && (
         <div
+          onClick={() => setShowSettings(false)}
           style={{
-            margin: '12px 16px',
-            background: '#111827',
-            padding: '16px',
-            borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.1)',
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+            background: 'rgba(0,0,0,0.6)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
           }}
         >
-          <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#94a3b8', margin: 0 }}>Connection Settings</h3>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <input
-              type="text"
-              value={customHost}
-              onChange={e => setCustomHost(e.target.value)}
-              placeholder="Host (e.g. 192.168.1.37)"
-              style={{
-                flex: 3,
-                padding: '9px 12px',
-                borderRadius: '8px',
-                background: '#090d16',
-                border: '1px solid #334155',
-                color: '#fff',
-                fontSize: '13px',
-              }}
-            />
-            <input
-              type="text"
-              value={customPort}
-              onChange={e => setCustomPort(e.target.value)}
-              placeholder="Port"
-              style={{
-                flex: 1,
-                padding: '9px 12px',
-                borderRadius: '8px',
-                background: '#090d16',
-                border: '1px solid #334155',
-                color: '#fff',
-                fontSize: '13px',
-              }}
-            />
-          </div>
-          <button
-            onClick={() => {
-              setHost(customHost);
-              setPort(customPort);
-              setShowSettings(false);
-            }}
+          <div
+            onClick={e => e.stopPropagation()}
             style={{
-              padding: '9px',
-              background: '#2563eb',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer',
+              width: '100%',
+              maxWidth: '380px',
+              background: '#1e1e1e',
+              border: '1px solid #333333',
+              borderRadius: '10px',
+              padding: '18px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
             }}
           >
-            Reconnect
-          </button>
-        </div>
-      )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '14px', fontWeight: 700, color: '#ededed' }}>Connection Settings</span>
+              <button
+                onClick={() => setShowSettings(false)}
+                style={{ background: 'transparent', border: 'none', color: '#888', cursor: 'pointer' }}
+              >
+                <X size={16} />
+              </button>
+            </div>
 
-      {/* Workspace Tabs (if multiple) */}
-      {workspaces.length > 1 && (
-        <div
-          style={{
-            display: 'flex',
-            gap: '8px',
-            overflowX: 'auto',
-            padding: '8px 16px',
-            borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-          }}
-        >
-          {workspaces.map(w => (
+            {/* Quick Connection Presets */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>Quick Presets</div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomHost('192.168.1.37');
+                    setCustomPort('4040');
+                    triggerHaptic(20);
+                  }}
+                  style={{
+                    flex: 1,
+                    background: '#242424',
+                    border: '1px solid #383838',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    color: '#ededed',
+                    fontSize: '11.5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <Wifi size={13} color="#10b981" />
+                  <span>Local Wi-Fi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomHost('discharge-inserted-predicted-ways.trycloudflare.com');
+                    setCustomPort('');
+                    triggerHaptic(20);
+                  }}
+                  style={{
+                    flex: 1,
+                    background: '#242424',
+                    border: '1px solid #383838',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    color: '#ededed',
+                    fontSize: '11.5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <Globe size={13} color="#007acc" />
+                  <span>Cloudflare</span>
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                Server Host / Domain
+              </label>
+              <input
+                type="text"
+                value={customHost}
+                onChange={e => setCustomHost(e.target.value)}
+                placeholder="192.168.1.37 or tunnel-url"
+                style={{
+                  width: '100%',
+                  background: '#141414',
+                  border: '1px solid #333',
+                  borderRadius: '6px',
+                  color: '#ededed',
+                  padding: '8px 10px',
+                  fontSize: '13px',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{ fontSize: '11px', color: '#888', display: 'block', marginBottom: '4px' }}>
+                Gateway Port (leave empty for Cloudflare)
+              </label>
+              <input
+                type="text"
+                value={customPort}
+                onChange={e => setCustomPort(e.target.value)}
+                placeholder="4040"
+                style={{
+                  width: '100%',
+                  background: '#141414',
+                  border: '1px solid #333',
+                  borderRadius: '6px',
+                  color: '#ededed',
+                  padding: '8px 10px',
+                  fontSize: '13px',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            {/* Test Notification Button */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              <div style={{ fontSize: '11px', color: '#888', fontWeight: 600 }}>Notifications & Lockscreen Alerts</div>
+              <button
+                type="button"
+                onClick={async () => {
+                  triggerHaptic([100, 50, 100]);
+                  await requestNotificationPermission();
+                  await dispatchApprovalNotification(
+                    'run_command',
+                    'powershell -Command "git status" (Test Lockscreen Action)',
+                    'test_req_' + Date.now()
+                  );
+                  setNotificationTestStatus('Notification sent! Check your notification drawer / lockscreen.');
+                  setTimeout(() => setNotificationTestStatus(''), 4000);
+                }}
+                style={{
+                  background: '#242424',
+                  border: '1px solid #383838',
+                  borderRadius: '6px',
+                  padding: '9px 12px',
+                  color: '#ededed',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                }}
+              >
+                <Bell size={14} color="#f59e0b" />
+                <span>Test Phone Notification</span>
+              </button>
+              {notificationTestStatus && (
+                <div style={{ fontSize: '11px', color: '#10b981', textAlign: 'center', marginTop: '2px' }}>
+                  {notificationTestStatus}
+                </div>
+              )}
+            </div>
+
             <button
-              key={w.id}
-              onClick={() => setActiveWorkspaceId(w.id)}
+              onClick={() => {
+                setHost(customHost);
+                setPort(customPort);
+                setShowSettings(false);
+                triggerHaptic(30);
+              }}
               style={{
-                padding: '5px 12px',
-                borderRadius: '8px',
-                background: w.id === activeWorkspace?.id ? '#1e293b' : 'transparent',
-                color: w.id === activeWorkspace?.id ? '#f8fafc' : '#94a3b8',
-                border: `1px solid ${w.id === activeWorkspace?.id ? 'rgba(255, 255, 255, 0.15)' : 'transparent'}`,
-                fontSize: '12px',
+                background: '#007acc',
+                border: 'none',
+                borderRadius: '6px',
+                color: '#fff',
+                padding: '10px',
+                fontSize: '13px',
                 fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
                 cursor: 'pointer',
-                whiteSpace: 'nowrap',
               }}
             >
-              <Folder size={12} />
-              <span>{w.name}</span>
+              Save & Reconnect
             </button>
-          ))}
+          </div>
         </div>
       )}
 
-      {/* Main Content Area */}
-      <main style={{ flex: 1, padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        {/* Desk Mode Banner */}
-        {companionMode === 'desk' && (
+      {/* --- Main Chat & Interaction Feed (Generous Padding & Anti-Clipping) --- */}
+      <main
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          padding: '16px 14px 130px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '14px',
+          maxWidth: '780px',
+          width: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box',
+          margin: '0 auto',
+        }}
+      >
+        {/* Remote Mode Status Banner */}
+        {companionMode === 'remote' ? (
           <div
             style={{
+              background: '#222222',
+              border: '1px solid #2e2e2e',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontSize: '12px',
+              color: '#a1a1aa',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              background: 'rgba(37, 99, 235, 0.08)',
-              border: '1px solid rgba(59, 130, 246, 0.25)',
-              fontSize: '12.5px',
-              color: '#93c5fd',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Laptop size={15} style={{ color: '#60a5fa' }} />
-              <span><strong>Desk Mode:</strong> Approvals appear directly on your PC IDE.</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Smartphone size={13} color="#007acc" />
+              <span>
+                <strong style={{ color: '#ededed' }}>Remote Priority:</strong> Tool approvals prompt directly on phone.
+              </span>
+            </div>
+            <button
+              onClick={() => toggleMode('desk')}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#007acc',
+                fontSize: '11px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Desk
+            </button>
+          </div>
+        ) : (
+          <div
+            style={{
+              background: '#222222',
+              border: '1px solid #2e2e2e',
+              borderRadius: '6px',
+              padding: '8px 12px',
+              fontSize: '12px',
+              color: '#a1a1aa',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Laptop size={13} color="#888" />
+              <span>
+                <strong style={{ color: '#ededed' }}>Desk Mode:</strong> Approvals appear directly on your PC IDE.
+              </span>
             </div>
             <button
               onClick={() => toggleMode('remote')}
               style={{
-                background: 'rgba(37, 99, 235, 0.25)',
-                border: '1px solid rgba(59, 130, 246, 0.4)',
-                borderRadius: '6px',
-                color: '#ffffff',
-                padding: '4px 10px',
+                background: '#007acc',
+                border: 'none',
+                color: '#fff',
                 fontSize: '11px',
                 fontWeight: 600,
+                padding: '3px 8px',
+                borderRadius: '4px',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease',
               }}
             >
-              Switch to Remote
+              Remote
             </button>
           </div>
         )}
 
-        {/* Live Conversation Stream */}
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          {chatMessages.length === 0 && pendingApprovals.length === 0 && (
-            <div
-              style={{
-                background: '#0f172a',
-                padding: '40px 20px',
-                borderRadius: '16px',
-                textAlign: 'center',
-                border: '1px dashed rgba(255, 255, 255, 0.1)',
-                marginTop: '40px',
-              }}
-            >
-              <div
+        {/* Disconnected State / 1-Tap Connect */}
+        {!connected && (
+          <div
+            style={{
+              background: '#1c1c1c',
+              border: '1px solid #333333',
+              borderRadius: '10px',
+              padding: '16px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+              boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ea580c', flexShrink: 0 }} />
+              <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#f8fafc' }}>
+                Connecting to PC Companion...
+              </span>
+            </div>
+            <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: '1.4' }}>
+              Choose your connection target below, or tap Settings (⚙️) to customize:
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setHost('192.168.1.37');
+                  setPort('4040');
+                  triggerHaptic(30);
+                }}
                 style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  background: 'rgba(37, 99, 235, 0.15)',
-                  color: '#60a5fa',
+                  background: '#242424',
+                  border: '1px solid #383838',
+                  borderRadius: '7px',
+                  padding: '10px 12px',
+                  color: '#ededed',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  textAlign: 'left',
                   display: 'flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
-                  margin: '0 auto 12px auto',
+                  justifyContent: 'space-between',
                 }}
               >
-                <Terminal size={24} />
-              </div>
-              <h3 style={{ fontSize: '15px', fontWeight: 600, color: '#f8fafc', margin: 0 }}>
-                Companion Online
-              </h3>
-              <p style={{ fontSize: '12px', color: '#64748b', marginTop: '6px', maxWidth: '300px', margin: '6px auto 0' }}>
-                Text below to send prompts directly to your IDE session. Tool approvals will appear here in real-time.
-              </p>
-            </div>
-          )}
-
-          {chatMessages.map(msg => {
-            // Case 1: Tool execution pill (clean & compact)
-            if (msg.role === 'tool' || msg.toolCall) {
-              return (
-                <ToolCallPill
-                  key={msg.id}
-                  toolCall={msg.toolCall}
-                  summary={msg.content}
-                />
-              );
-            }
-
-            // Case 2: User message (Exact Desktop IDE pill)
-            if (msg.role === 'user') {
-              return (
-                <div
-                  key={msg.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    margin: '6px 0',
-                  }}
-                >
-                  <div
-                    style={{
-                      width: '100%',
-                      padding: '10px 14px',
-                      borderRadius: '12px',
-                      background: '#27272a',
-                      color: '#f4f4f5',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      fontSize: '13.5px',
-                      lineHeight: '1.5',
-                      userSelect: 'text',
-                    }}
-                  >
-                    {msg.content}
-                  </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Wifi size={14} color="#10b981" />
+                  <span>Connect via Local Wi-Fi (192.168.1.37)</span>
                 </div>
-              );
-            }
+                <ChevronRight size={13} color="#888" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setHost('discharge-inserted-predicted-ways.trycloudflare.com');
+                  setPort('');
+                  triggerHaptic(30);
+                }}
+                style={{
+                  background: '#242424',
+                  border: '1px solid #383838',
+                  borderRadius: '7px',
+                  padding: '10px 12px',
+                  color: '#ededed',
+                  fontSize: '12.5px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Globe size={14} color="#007acc" />
+                  <span>Connect via Cloudflare Tunnel (Cellular)</span>
+                </div>
+                <ChevronRight size={13} color="#888" />
+              </button>
+            </div>
+          </div>
+        )}
 
-            // Case 3: Assistant response (Clean stream directly on canvas)
+        {/* Empty State when Connected */}
+        {connected && chatMessages.length === 0 && pendingApprovals.length === 0 && (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '40px 20px',
+              textAlign: 'center',
+              color: '#71717a',
+            }}
+          >
+            <Terminal size={32} color="#444" style={{ marginBottom: '12px' }} />
+            <div style={{ fontSize: '14px', fontWeight: 600, color: '#ededed', marginBottom: '4px' }}>
+              Antigravity Session Attached
+            </div>
+            <div style={{ fontSize: '12px', maxWidth: '280px' }}>
+              Prompts and tool permission gates in your PC session will mirror here in real time.
+            </div>
+          </div>
+        )}
+
+        {/* Chat History Messages */}
+        {chatMessages.map(msg => {
+          if (msg.role === 'user') {
             return (
               <div
                 key={msg.id}
                 style={{
+                  alignSelf: 'flex-end',
+                  maxWidth: '85%',
+                  background: '#282828',
+                  border: '1px solid #383838',
+                  borderRadius: '12px',
+                  padding: '10px 14px',
+                  color: '#ededed',
+                  fontSize: '13.5px',
+                  lineHeight: '1.5',
+                  wordBreak: 'break-word',
                   display: 'flex',
                   flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: '4px',
-                  margin: '4px 0',
-                  width: '100%',
+                  gap: '6px',
                 }}
               >
-                {/* Collapsible Thinking Accordion */}
-                {msg.thought && <ThinkingAccordion thought={msg.thought} />}
-
-                {/* Formatted Markdown Body */}
-                <div style={{ color: '#e4e4e7', fontSize: '13.5px', lineHeight: '1.6', width: '100%' }}>
-                  <FormattedMessage text={msg.content} />
-                </div>
-
-                {/* Streaming token cursor */}
-                {msg.id === 'streaming_active' && (
-                  <span
+                {/* Multi-Image Display in Chat Bubble */}
+                {msg.images && msg.images.length > 0 ? (
+                  <div
                     style={{
-                      display: 'inline-block',
-                      width: '6px',
-                      height: '14px',
-                      background: '#38bdf8',
-                      marginLeft: '4px',
-                      verticalAlign: 'middle',
-                      animation: 'pulse 1s infinite',
+                      display: 'grid',
+                      gridTemplateColumns: msg.images.length > 1 ? 'repeat(2, 1fr)' : '1fr',
+                      gap: '6px',
+                      maxWidth: '100%',
+                    }}
+                  >
+                    {msg.images.map((url, i) => (
+                      <img
+                        key={i}
+                        src={url}
+                        alt={`Attachment ${i + 1}`}
+                        style={{
+                          width: '100%',
+                          maxHeight: '180px',
+                          borderRadius: '6px',
+                          objectFit: 'cover',
+                          border: '1px solid #383838',
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : msg.imageUrl ? (
+                  <img
+                    src={msg.imageUrl}
+                    alt="Attachment"
+                    style={{
+                      maxWidth: '100%',
+                      maxHeight: '220px',
+                      borderRadius: '8px',
+                      objectFit: 'cover',
                     }}
                   />
-                )}
+                ) : null}
+
+                {msg.content && <span>{msg.content}</span>}
               </div>
             );
-          })}
+          }
 
-          {/* Waiting for user input indicator (Exact Desktop IDE) */}
-          {pendingApprovals.length > 0 && (
+          if (msg.role === 'tool') {
+            return (
+              <ActivityRow
+                key={msg.id}
+                icon={Terminal}
+                title={msg.toolCall?.name || 'Tool Executed'}
+                subtitle={msg.toolCall?.args?.CommandLine ? `Ran ${msg.toolCall.args.CommandLine}` : undefined}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                  <span style={{ color: '#888' }}>Result</span>
+                  <CopyButton text={typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)} />
+                </div>
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>
+                  {typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content, null, 2)}
+                </pre>
+              </ActivityRow>
+            );
+          }
+
+          // Assistant message with Markdown formatting
+          return (
             <div
+              key={msg.id}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
+                alignSelf: 'flex-start',
+                width: '100%',
+                maxWidth: '100%',
+                minWidth: 0,
+                color: '#e2e8f0',
+                display: 'flex',
+                flexDirection: 'column',
                 gap: '8px',
-                color: '#71717a',
-                fontSize: '13px',
-                margin: '6px 0 2px 2px',
-                userSelect: 'none',
+                padding: '2px 0',
+                boxSizing: 'border-box',
+                wordBreak: 'break-word',
+                overflowWrap: 'anywhere',
               }}
             >
-              <span>Waiting for user input..</span>
-              <span
-                style={{
-                  width: '6px',
-                  height: '6px',
-                  borderRadius: '50%',
-                  background: '#38bdf8',
-                  animation: 'pulse 1.5s infinite',
-                }}
-              />
+              <MarkdownContent content={msg.content} />
+              {msg.id === 'streaming_active' && (
+                <span
+                  style={{
+                    display: 'inline-block',
+                    width: '7px',
+                    height: '14px',
+                    background: '#007acc',
+                    marginLeft: '4px',
+                    verticalAlign: 'middle',
+                  }}
+                />
+              )}
             </div>
-          )}
+          );
+        })}
 
-          <div ref={chatBottomRef} />
-        </section>
-      </main>
+        {/* --- EXACT 1-TO-1 ANTIGRAVITY PERMISSION GATE --- */}
+        {pendingApprovals.map(req => {
+          const selected = selectedOptions[req.id] || 1;
+          const cmd =
+            req.toolCall?.args?.CommandLine ||
+            (req.toolCall?.args?.TargetFile ? req.toolCall.args.TargetFile : JSON.stringify(req.toolCall?.args || {}));
 
-      {/* FLOATING PERMISSION GATE (Desktop IDE Question & File Changes Mirror) */}
-      {pendingApprovals.length > 0 && (
-        <aside
-          style={{
-            position: 'fixed',
-            bottom: '76px',
-            left: '12px',
-            right: '12px',
-            maxWidth: '616px',
-            margin: '0 auto',
-            zIndex: 100,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '10px',
-          }}
-        >
-          {pendingApprovals.map(req => {
-            const cmd = req.toolCall?.args?.CommandLine;
-            // Truncate long commands (e.g. shell here-docs) for display only
-            const cmdShort = cmd && cmd.length > 120 ? cmd.slice(0, 117) + '...' : cmd;
-            const cmdLabel = cmd && cmd.length > 40 ? cmd.slice(0, 37) + '...' : cmd;
-            const currentOpt = selectedOptions[req.id] || 1;
-            const hasFiles = req.gitChanges && req.gitChanges.length > 0;
-            const isFilesOpen = showFileChanges[req.id] !== false; // open by default
+          return (
+            <div
+              key={req.id}
+              style={{
+                background: '#1e1e1e',
+                border: '1px solid #333333',
+                borderRadius: '8px',
+                padding: '14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+                marginTop: '6px',
+              }}
+            >
+              {/* Header Title */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Terminal size={15} color="#007acc" />
+                <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#f1f5f9' }}>
+                  Allow {req.toolTitle || req.toolCall?.name}?
+                </span>
+              </div>
 
-            return (
+              {/* Terminal Command Box */}
               <div
-                key={req.id}
                 style={{
-                  background: '#161a23',
-                  borderRadius: '14px',
-                  padding: '14px 16px',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  boxShadow: '0 16px 40px rgba(0, 0, 0, 0.85), 0 0 20px rgba(37, 99, 235, 0.15)',
-                  backdropFilter: 'blur(16px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
+                  background: '#141414',
+                  border: '1px solid #282828',
+                  borderRadius: '6px',
+                  padding: '9px 11px',
+                  fontSize: '12px',
+                  fontFamily: 'monospace',
+                  color: '#ededed',
+                  wordBreak: 'break-all',
                 }}
               >
-                {/* 1. Files With Changes Drawer Header */}
-                {hasFiles && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {cmd}
+              </div>
+
+              {/* 4 Numbered Antigravity Options */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {[
+                  { id: 1, label: 'Yes, allow this time' },
+                  { id: 2, label: `Yes, and always allow in this conversation` },
+                  { id: 3, label: `Yes, and always allow '${req.toolCall?.name}'` },
+                  { id: 4, label: 'No (tell the agent what to do instead)' },
+                ].map(opt => {
+                  const isOptSelected = selected === opt.id;
+                  return (
                     <div
+                      key={opt.id}
+                      onClick={() => {
+                        setSelectedOptions({ ...selectedOptions, [req.id]: opt.id });
+                        triggerHaptic(20);
+                      }}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingBottom: '6px',
-                        borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                        gap: '10px',
+                        padding: '8px 10px',
+                        borderRadius: '6px',
+                        background: isOptSelected ? '#333333' : 'transparent',
+                        border: `1px solid ${isOptSelected ? '#444444' : 'transparent'}`,
+                        cursor: 'pointer',
+                        fontSize: '12.5px',
+                        color: isOptSelected ? '#ffffff' : '#a1a1aa',
                       }}
                     >
-                      <div
-                        onClick={() => setShowFileChanges(prev => ({ ...prev, [req.id]: !isFilesOpen }))}
-                        style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}
+                      <span
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '4px',
+                          background: isOptSelected ? '#007acc' : '#282828',
+                          color: '#fff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                        }}
                       >
-                        <ChevronDown
-                          size={14}
-                          color="#94a3b8"
-                          style={{
-                            transform: isFilesOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
-                            transition: 'transform 0.15s ease',
-                          }}
-                        />
-                        <FileCode size={14} color="#94a3b8" />
-                        <span style={{ fontSize: '12px', fontWeight: 600, color: '#f1f5f9' }}>
-                          {req.gitChanges!.length} Files With Changes
-                        </span>
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px' }}>
-                        <span style={{ color: '#94a3b8', cursor: 'pointer' }}>Reject all</span>
-                        <span style={{ color: '#38bdf8', fontWeight: 600, cursor: 'pointer' }}>Accept all</span>
-                      </div>
+                        {opt.id}
+                      </span>
+                      <span>{opt.label}</span>
                     </div>
-
-                    {isFilesOpen && (
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '4px',
-                          background: 'rgba(0, 0, 0, 0.3)',
-                          borderRadius: '6px',
-                          padding: '6px 8px',
-                          maxHeight: '110px',
-                          overflowY: 'auto',
-                        }}
-                      >
-                        {req.gitChanges!.map((change: GitFileChange) => (
-                          <div
-                            key={change.file}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              fontSize: '11px',
-                              fontFamily: 'Geist Mono, monospace',
-                            }}
-                          >
-                            <span style={{ color: '#22c55e', fontWeight: 700 }}>+{change.insertions}</span>
-                            <span style={{ color: '#ef4444', fontWeight: 700 }}>-{change.deletions}</span>
-                            <span style={{ color: '#f8fafc', fontWeight: 600 }}>{change.file}</span>
-                            <span
-                              style={{
-                                color: '#64748b',
-                                fontSize: '10px',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {change.relativePath}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 2. Dialog Header: [?] Allow <Title>? */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div
-                    style={{
-                      width: '22px',
-                      height: '22px',
-                      borderRadius: '5px',
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      border: '1px solid rgba(255, 255, 255, 0.12)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: '#94a3b8',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                    }}
-                  >
-                    ?
-                  </div>
-                  <span style={{ fontSize: '13px', fontWeight: 600, color: '#f8fafc', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {req.toolTitle || `Allow running ${cmdLabel || req.toolCall?.name}?`}
-                  </span>
-                </div>
-
-                {/* 3. Command Box */}
-                {cmd && (
-                  <div
-                    style={{
-                      background: '#0a0d14',
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      fontFamily: 'Geist Mono, monospace',
-                      fontSize: '12px',
-                      color: '#cbd5e1',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: '8px',
-                    }}
-                  >
-                    <span style={{ wordBreak: 'break-word', overflow: 'hidden', maxHeight: '60px', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical' }}>{cmd}</span>
-                    <CopyButton text={cmd} />
-                  </div>
-                )}
-
-                {/* 4. Numbered Options (Desktop IDE Mirror) */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                  {[
-                    { id: 1, label: 'Yes, allow this time' },
-                    { id: 2, label: `Yes, and always allow '${cmdLabel || req.toolCall?.name}' in this conversation` },
-                    { id: 3, label: `Yes, and always allow '${cmdLabel || req.toolCall?.name}'` },
-                    { id: 4, label: 'No (tell the agent what to do instead)' },
-                  ].map(opt => {
-                    const isSelected = currentOpt === opt.id;
-                    return (
-                      <div
-                        key={opt.id}
-                        onClick={() => {
-                          setSelectedOptions(prev => ({ ...prev, [req.id]: opt.id }));
-                          triggerHaptic(30);
-                        }}
-                        style={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '6px',
-                          padding: '8px 10px',
-                          borderRadius: '6px',
-                          background: isSelected ? '#252d3d' : 'rgba(255, 255, 255, 0.03)',
-                          border: isSelected ? '1px solid #3b82f6' : '1px solid rgba(255, 255, 255, 0.05)',
-                          cursor: 'pointer',
-                          transition: 'all 0.12s ease',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-                          <span
-                            style={{
-                              fontSize: '12px',
-                              fontFamily: 'monospace',
-                              color: isSelected ? '#60a5fa' : '#64748b',
-                              fontWeight: 700,
-                              marginTop: '1px',
-                            }}
-                          >
-                            {opt.id}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '12.5px',
-                              color: isSelected ? '#ffffff' : '#94a3b8',
-                              fontWeight: isSelected ? 600 : 400,
-                              lineHeight: 1.35,
-                            }}
-                          >
-                            {opt.label}
-                          </span>
-                        </div>
-
-                        {/* Input for Option 4 */}
-                        {opt.id === 4 && isSelected && (
-                          <input
-                            type="text"
-                            placeholder="Type what to do instead..."
-                            value={option4Inputs[req.id] || ''}
-                            onChange={e => setOption4Inputs(prev => ({ ...prev, [req.id]: e.target.value }))}
-                            onClick={e => e.stopPropagation()}
-                            autoFocus
-                            style={{
-                              marginTop: '2px',
-                              padding: '8px 10px',
-                              borderRadius: '6px',
-                              background: '#090d16',
-                              border: '1px solid #3b82f6',
-                              color: '#ffffff',
-                              fontSize: '12.5px',
-                              outline: 'none',
-                            }}
-                          />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 5. Bottom Actions: Skip and Submit */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '10px', marginTop: '2px' }}>
-                  <button
-                    onClick={() => sendDecision(req.id, 'deny', 0, 'Skipped by user')}
-                    style={{
-                      background: 'transparent',
-                      border: 'none',
-                      color: '#94a3b8',
-                      fontSize: '12.5px',
-                      fontWeight: 500,
-                      cursor: 'pointer',
-                      padding: '6px 10px',
-                    }}
-                  >
-                    Skip
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      const opt = selectedOptions[req.id] || 1;
-                      if (opt === 4) {
-                        sendDecision(req.id, 'deny', 4, option4Inputs[req.id] || '');
-                      } else {
-                        sendDecision(req.id, 'allow', opt);
-                      }
-                    }}
-                    style={{
-                      background: '#0284c7',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '7px 16px',
-                      fontSize: '13px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      boxShadow: '0 2px 8px rgba(2, 132, 199, 0.4)',
-                    }}
-                  >
-                    <span>Submit</span>
-                    <span style={{ fontSize: '11px', opacity: 0.8 }}>↵</span>
-                  </button>
-                </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </aside>
-      )}
 
-      {/* Fixed Thumb-Zone Bottom Input Bar */}
+              {/* If Option 4 (Reject & Tell agent) is selected */}
+              {selected === 4 && (
+                <input
+                  type="text"
+                  placeholder="Tell the agent what to do instead..."
+                  value={option4Inputs[req.id] || ''}
+                  onChange={e => setOption4Inputs({ ...option4Inputs, [req.id]: e.target.value })}
+                  style={{
+                    background: '#141414',
+                    border: '1px solid #333',
+                    borderRadius: '6px',
+                    color: '#ededed',
+                    padding: '8px 10px',
+                    fontSize: '12px',
+                    outline: 'none',
+                  }}
+                />
+              )}
+
+              {/* Action Buttons: Skip & Submit */}
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={() => sendDecision(req.id, 'deny', 0, 'Skipped by user')}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: '#888888',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    padding: '8px 12px',
+                  }}
+                >
+                  Skip
+                </button>
+                <button
+                  onClick={() => {
+                    if (selected === 4) {
+                      sendDecision(req.id, 'deny', 4, option4Inputs[req.id] || '');
+                    } else {
+                      sendDecision(req.id, 'allow', selected);
+                    }
+                  }}
+                  style={{
+                    background: '#007acc',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '8px 18px',
+                    fontSize: '12.5px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span>Submit</span>
+                  <span style={{ fontSize: '10px', opacity: 0.8 }}>↵</span>
+                </button>
+              </div>
+            </div>
+          );
+        })}
+
+        <div ref={chatBottomRef} />
+      </main>
+
+      {/* --- Bottom Input Thumb Zone (Multi-Image & Fast Submit) --- */}
       <footer
-        style={{
-          position: 'fixed',
-          bottom: '24px',
-          left: 0,
-          right: 0,
-          zIndex: 40,
-          background: '#141416',
-          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
-          padding: '8px 12px',
-        }}
-      >
-        <div
-          style={{
-            maxWidth: '680px',
-            margin: '0 auto',
-            display: 'flex',
-            gap: '8px',
-            alignItems: 'center',
-          }}
-        >
-          <input
-            type="text"
-            placeholder={isStreaming ? 'Agent is working on PC...' : 'Ask a follow up...'}
-            value={promptText}
-            onChange={e => setPromptText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendPrompt();
-              }
-            }}
-            disabled={!connected || isStreaming}
-            style={{
-              flex: 1,
-              height: '42px',
-              padding: '0 14px',
-              borderRadius: '8px',
-              background: '#18181b',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              color: '#f4f4f5',
-              fontSize: '13.5px',
-              outline: 'none',
-            }}
-          />
-
-          <button
-            onClick={sendPrompt}
-            disabled={!connected || isStreaming || !promptText.trim()}
-            style={{
-              height: '42px',
-              width: '42px',
-              borderRadius: '8px',
-              background: connected && promptText.trim() ? '#2563eb' : 'rgba(255, 255, 255, 0.05)',
-              color: connected && promptText.trim() ? '#ffffff' : '#71717a',
-              border: 'none',
-              cursor: connected && promptText.trim() ? 'pointer' : 'default',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            <Send size={15} />
-          </button>
-        </div>
-      </footer>
-
-      {/* Desktop IDE Status Bar */}
-      <div
         style={{
           position: 'fixed',
           bottom: 0,
           left: 0,
           right: 0,
-          height: '24px',
-          background: '#141416',
-          borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-          zIndex: 45,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 12px',
-          fontSize: '11px',
-          color: '#71717a',
-          fontFamily: 'monospace',
-          userSelect: 'none',
+          background: '#141414',
+          borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+          paddingTop: '8px',
+          paddingLeft: 'max(14px, env(safe-area-inset-left, 0px))',
+          paddingRight: 'max(14px, env(safe-area-inset-right, 0px))',
+          paddingBottom: 'max(12px, calc(10px + env(safe-area-inset-bottom, 0px)))',
+          boxSizing: 'border-box',
+          zIndex: 40,
         }}
       >
-        <div style={{ display: 'flex', gap: '12px' }}>
-          <span>Ln 1, Col 1</span>
-          <span>Spaces: 4</span>
-          <span>UTF-8</span>
-          <span>LF</span>
+        {/* Hidden File Input (Supports Multiple Image Selection) */}
+        <input
+          type="file"
+          accept="image/*"
+          multiple
+          ref={fileInputRef}
+          onChange={handleFileChange}
+          style={{ display: 'none' }}
+        />
+
+        <div
+          style={{
+            maxWidth: '780px',
+            margin: '0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          {/* Multiple Attached Images Preview Horizontal Tray */}
+          {attachedImages.length > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                gap: '8px',
+                overflowX: 'auto',
+                paddingBottom: '4px',
+                maxWidth: '100%',
+              }}
+            >
+              {attachedImages.map((img, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    background: '#252525',
+                    border: '1px solid #333333',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    flexShrink: 0,
+                  }}
+                >
+                  <img
+                    src={img.preview}
+                    alt={img.name}
+                    style={{ width: '26px', height: '26px', borderRadius: '4px', objectFit: 'cover' }}
+                  />
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      color: '#ededed',
+                      maxWidth: '110px',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {img.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setAttachedImages(prev => prev.filter((_, i) => i !== idx))}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#9ca3af',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+            {/* Multiple Photos Picker Button */}
+            <button
+              type="button"
+              onClick={() => {
+                fileInputRef.current?.click();
+                triggerHaptic(20);
+              }}
+              title="Attach Photos"
+              style={{
+                height: '44px',
+                width: '44px',
+                borderRadius: '8px',
+                background: attachedImages.length > 0 ? '#333333' : '#222222',
+                border: '1px solid #333333',
+                color: attachedImages.length > 0 ? '#007acc' : '#9ca3af',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+                position: 'relative',
+              }}
+            >
+              <ImageIcon size={18} />
+              {attachedImages.length > 1 && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '4px',
+                    right: '4px',
+                    background: '#007acc',
+                    color: '#fff',
+                    borderRadius: '50%',
+                    width: '14px',
+                    height: '14px',
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  {attachedImages.length}
+                </span>
+              )}
+            </button>
+
+            <textarea
+              placeholder={isStreaming ? 'Agent is working on PC...' : 'Message Antigravity...'}
+              value={promptText}
+              onChange={e => setPromptText(e.target.value)}
+              onKeyDown={e => {
+                // Desktop: Ctrl+Enter or Cmd+Enter submits
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  e.preventDefault();
+                  sendPrompt();
+                }
+                // Mobile & Normal: Enter key inserts newline! Never submits prematurely.
+              }}
+              enterKeyHint="enter"
+              rows={1}
+              autoComplete="off"
+              disabled={!connected || isStreaming}
+              style={{
+                flex: 1,
+                minHeight: '44px',
+                maxHeight: '120px',
+                padding: '11px 14px',
+                borderRadius: '8px',
+                background: '#222222',
+                border: '1px solid #333333',
+                color: '#ededed',
+                fontSize: '14px',
+                lineHeight: '1.4',
+                outline: 'none',
+                resize: 'none',
+                boxSizing: 'border-box',
+                fontFamily: 'inherit',
+              }}
+            />
+
+            <button
+              type="button"
+              onClick={sendPrompt}
+              disabled={!connected || isStreaming || (!promptText.trim() && attachedImages.length === 0)}
+              style={{
+                height: '44px',
+                width: '44px',
+                borderRadius: '8px',
+                background: connected && (promptText.trim() || attachedImages.length > 0) ? '#007acc' : '#282828',
+                color: connected && (promptText.trim() || attachedImages.length > 0) ? '#ffffff' : '#666666',
+                border: 'none',
+                cursor: connected && (promptText.trim() || attachedImages.length > 0) ? 'pointer' : 'default',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                flexShrink: 0,
+              }}
+            >
+              <Send size={15} />
+            </button>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <span>{'{ }'} Markdown</span>
-          <span
-            onClick={() => setShowSettings(true)}
-            style={{ color: '#a1a1aa', cursor: 'pointer' }}
-          >
-            Antigravity - Settings
-          </span>
-        </div>
-      </div>
+      </footer>
     </div>
   );
 }

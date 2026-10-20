@@ -221,6 +221,25 @@ export class WsGateway {
           return;
         }
 
+        // Serve compiled Android APK
+        if (url === '/download/app.apk' || url === '/app.apk') {
+          const apkPath = path.resolve(__dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk');
+          if (fs.existsSync(apkPath)) {
+            const stat = fs.statSync(apkPath);
+            res.writeHead(200, {
+              'Content-Type': 'application/vnd.android.package-archive',
+              'Content-Disposition': 'attachment; filename="AntigravityCompanion.apk"',
+              'Content-Length': stat.size,
+            });
+            fs.createReadStream(apkPath).pipe(res);
+            return;
+          } else {
+            res.writeHead(404, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'APK is compiling or not found' }));
+            return;
+          }
+        }
+
         // Serve built web companion UI
         if (this.serveStatic(url, res)) {
           return;
@@ -278,6 +297,10 @@ export class WsGateway {
         // Acknowledge client connection
         break;
 
+      case 'client:ping':
+        ws.send(JSON.stringify({ type: 'server:pong', timestamp: Date.now() }));
+        break;
+
       case 'client:respond_approval':
         this.hookIpc.resolveApproval(msg.payload);
         break;
@@ -333,9 +356,11 @@ export class WsGateway {
 
         // If an active Antigravity IDE conversation is being tracked, inject into this IDE chat!
         if (this.ideWatcher.getActiveConversationId()) {
-          const injected = this.ideWatcher.injectMessageToIde(msg.prompt);
-          if (injected) {
-            // Optimistically show user message on phone
+          const imgs = msg.images || (msg.imageBase64 ? [{ base64: msg.imageBase64, name: msg.imageName || 'photo.png' }] : []);
+          const res = this.ideWatcher.injectMessageToIde(msg.prompt, imgs);
+          if (res.success) {
+            const dataUrls = imgs.map(i => `data:image/png;base64,${i.base64}`);
+            // Optimistically show user message on phone with all attached images
             this.broadcast({
               type: 'server:chat_message',
               workspaceId: wsState.id,
@@ -344,6 +369,8 @@ export class WsGateway {
                 role: 'user',
                 content: msg.prompt,
                 timestamp: Date.now(),
+                images: dataUrls,
+                imageUrl: dataUrls[0],
               },
             });
             return;

@@ -38,25 +38,30 @@ Antigravity CLI (agy running on PC)
 ## 4. Phase 1 Implementation Checklist
 
 ### Step 1: Daemon Foundation
-- [ ] Initialize `daemon/` with TypeScript, `ws` (WebSockets), and `express` (local API).
-- [ ] Implement `AgySession` process runner using `agy --input-format stream-json --output-format stream-json`.
-- [ ] Handle NDJSON streaming parsing for tokens, tool calls, and completion signals.
+- [x] Initialize `daemon/` with TypeScript, `ws` (WebSockets), and `express` (local API).
+- [x] Implement `AgySession` process runner using `agy --input-format stream-json --output-format stream-json`.
+- [x] Handle NDJSON streaming parsing for tokens, tool calls, and completion signals.
 
 ### Step 2: Permission Interception Hook
-- [ ] Create `hooks/interceptor.js` implementing the Antigravity `PreToolUse` contract.
-- [ ] When Antigravity requests a tool call, the hook queries the local Daemon:
-  - If auto-approved by policy -> return `{"decision": "allow"}`.
-  - If requires approval -> register a pending approval request with a unique ID and hold execution.
-- [ ] Long-poll or WebSocket notify until the phone approves or denies.
+- [x] Create `hooks/interceptor.js` implementing the Antigravity `PreToolUse` contract.
+- [x] When Antigravity requests a tool call, the hook queries the local Daemon:
+  - If auto-approved by policy (or Desk Mode) -> return `{"decision": "allow"}`.
+  - If requires approval (Remote Mode) -> register a pending approval request with a unique ID and hold execution.
+- [x] Real-time WebSocket notify and hold until the phone approves or denies.
 
 ### Step 3: Mobile Web/PWA Client (Immediate Dogfooding)
-- [ ] Mobile-first UI (Vite + React + Tailwind CSS).
-- [ ] Connects to PC daemon WebSocket (`ws://<PC_LOCAL_IP>:4040` or tunnel).
-- [ ] Screens:
-  - **Live Chat Stream:** Markdown rendering of model responses and tool executions.
-  - **Permission Card Banner:** Prominent sticky modal with action buttons (*Allow*, *Always Allow*, *Deny*, *Intercept*).
-  - **Intercept Dialog:** Text input to inject a redirection prompt back to the CLI.
+- [x] Mobile-first UI (Vite + React + Linear/Raycast dark theme).
+- [x] Connects to PC daemon WebSocket (`ws://<PC_LOCAL_IP>:4040` or worldwide Cloudflare tunnel).
+- [x] Screens & Features:
+  - **Live Chat Stream:** Markdown rendering of model responses, thoughts, and tool executions.
+  - **Permission Card Banner:** Prominent sticky modal with action buttons (*Allow*, *Deny*, *Intercept*).
+  - **Desk vs Remote Mode:** Space-efficient header toggle for phone-exclusive approval routing.
+  - **Multi-Photo Tray:** Camera capture and multiple photo attachments.
+  - **Virtual Keyboard Fix:** Multi-line textarea with Return key inserting `\n`.
+  - **Connection Resilience:** 15s keep-alive heartbeat ping and 2s auto-reconnect loop.
 
 ### Step 4: Native Android Wrap
-- [ ] Package web app with Capacitor into an installable `.apk` for Android.
-- [ ] Enable local vibration and persistent wake locks.
+- [x] Package web app with Capacitor into an installable `.apk` for Android (`assembleDebug`).
+- [x] Native local notifications with vibration, chime, and lockscreen action buttons (`@capacitor/local-notifications`).
+- [x] Dark status/navigation bars and safe-area inset handling.
+- [x] Built-in `/download/app.apk` endpoint for instant direct-to-phone installation.

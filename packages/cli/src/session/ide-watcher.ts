@@ -211,9 +211,13 @@ export class IdeTranscriptWatcher extends EventEmitter {
     return match ? match[1] : null;
   }
 
-  public injectMessageToIde(content: string): boolean {
+  public injectMessageToIde(
+    content: string,
+    images?: { base64: string; name: string }[] | { base64?: string; name?: string },
+    imageName?: string
+  ): { success: boolean; imageSavedPaths: string[] } {
     const convId = this.getActiveConversationId();
-    if (!convId) return false;
+    if (!convId) return { success: false, imageSavedPaths: [] };
 
     const home = os.homedir();
     const messagesDir = path.join(
@@ -226,6 +230,16 @@ export class IdeTranscriptWatcher extends EventEmitter {
       'messages'
     );
     const undeliveredDir = path.join(messagesDir, 'undelivered');
+    const userUploadedDir = path.join(
+      home,
+      '.gemini',
+      'antigravity-ide',
+      'brain',
+      convId,
+      '.user_uploaded'
+    );
+
+    const savedPaths: string[] = [];
 
     try {
       if (!fs.existsSync(messagesDir)) {
@@ -235,8 +249,38 @@ export class IdeTranscriptWatcher extends EventEmitter {
         fs.mkdirSync(undeliveredDir, { recursive: true });
       }
 
+      // Normalize images input
+      let imageList: { base64: string; name: string }[] = [];
+      if (Array.isArray(images)) {
+        imageList = images;
+      } else if (typeof images === 'string') {
+        imageList = [{ base64: images, name: imageName || 'mobile_photo.png' }];
+      } else if (images && (images as any).base64) {
+        imageList = [{ base64: (images as any).base64, name: (images as any).name || 'mobile_photo.png' }];
+      }
+
+      if (imageList.length > 0) {
+        if (!fs.existsSync(userUploadedDir)) {
+          fs.mkdirSync(userUploadedDir, { recursive: true });
+        }
+        for (const img of imageList) {
+          const safeName = (img.name || 'mobile_photo.png').replace(/[^a-zA-Z0-9._-]/g, '_');
+          const filename = `mobile_${Date.now()}_${Math.floor(Math.random() * 1000)}_${safeName}`;
+          const targetPath = path.join(userUploadedDir, filename);
+          const buf = Buffer.from(img.base64, 'base64');
+          fs.writeFileSync(targetPath, buf);
+          savedPaths.push(targetPath);
+        }
+      }
+
       // Generate RFC4122 v4 UUID
       const msgId = crypto.randomUUID();
+      let fullContent = `[📱 Message from Phone]: ${content}`;
+      if (savedPaths.length > 0) {
+        fullContent +=
+          '\n\n' + savedPaths.map(p => `[Attached Media]: file:///${p.replace(/\\/g, '/')}`).join('\n');
+      }
+
       const payload = {
         id: msgId,
         recipient: convId,
@@ -246,7 +290,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
         renderDetails: {
           messageTitle: 'Prompt from Mobile Companion',
         },
-        content: `[📱 Message from Phone]: ${content}`,
+        content: fullContent,
       };
 
       // Antigravity IDE protocol:
@@ -271,11 +315,15 @@ export class IdeTranscriptWatcher extends EventEmitter {
         req.end();
       } catch {}
 
-      console.log(`\n🔔 [INPUT NEEDED] Mobile prompt dispatched to Antigravity: "${content}"\n`);
-      return true;
+      console.log(
+        `\n🔔 [INPUT NEEDED] Mobile prompt dispatched to Antigravity: "${content}" ${
+          savedPaths.length > 0 ? `[with media: ${savedPaths.join(', ')}]` : ''
+        }\n`
+      );
+      return { success: true, imageSavedPaths: savedPaths };
     } catch (err: any) {
       console.error(`[IdeWatcher] Failed to inject message into IDE:`, err.message);
-      return false;
+      return { success: false, imageSavedPaths: [] };
     }
   }
 }
