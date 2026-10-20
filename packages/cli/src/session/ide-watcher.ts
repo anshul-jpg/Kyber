@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import http from 'http';
 import crypto from 'crypto';
 import { EventEmitter } from 'events';
 import { ChatMessage } from '@agy-companion/protocol';
@@ -257,7 +258,20 @@ export class IdeTranscriptWatcher extends EventEmitter {
       const markerFile = path.join(undeliveredDir, msgId);
       fs.writeFileSync(markerFile, '', 'utf8');
 
-      console.log(`\n📱 [PHONE -> IDE] Delivered prompt to active IDE chat: "${content}"\n`);
+      // 3. Trigger instant sub-second wakeup via local wake listener (0ms debounce)
+      try {
+        const req = http.request({
+          hostname: '127.0.0.1',
+          port: 4049,
+          path: '/wake',
+          method: 'GET',
+          timeout: 200,
+        });
+        req.on('error', () => {});
+        req.end();
+      } catch {}
+
+      console.log(`\n🔔 [INPUT NEEDED] Mobile prompt dispatched to Antigravity: "${content}"\n`);
       return true;
     } catch (err: any) {
       console.error(`[IdeWatcher] Failed to inject message into IDE:`, err.message);

@@ -67,6 +67,7 @@ export type WsClientMessage =
   | { type: 'client:respond_approval'; payload: ApprovalDecisionPayload }
   | { type: 'client:send_prompt'; workspaceId: string; prompt: string }
   | { type: 'client:switch_workspace'; workspaceId: string }
+  | { type: 'client:register_workspace'; path: string }
   | { type: 'client:set_mode'; mode: 'desk' | 'remote' }
   | { type: 'client:list_workspaces' };
 

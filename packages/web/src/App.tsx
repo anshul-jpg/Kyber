@@ -536,12 +536,42 @@ export default function App() {
   });
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [showProjectDrawer, setShowProjectDrawer] = useState<boolean>(false);
+  const [newProjectPath, setNewProjectPath] = useState<string>('');
   const [companionMode, setCompanionMode] = useState<'desk' | 'remote'>('remote');
   const [customHost, setCustomHost] = useState(host);
   const [customPort, setCustomPort] = useState(port);
 
   const wsRef = useRef<WebSocket | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
+
+  const switchWorkspace = (wsId: string) => {
+    setActiveWorkspaceId(wsId);
+    triggerHaptic(30);
+    setShowProjectDrawer(false);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'client:switch_workspace',
+          workspaceId: wsId,
+        })
+      );
+    }
+  };
+
+  const registerNewWorkspace = (dirPath: string) => {
+    if (!dirPath.trim()) return;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'client:register_workspace',
+          path: dirPath.trim(),
+        })
+      );
+      setNewProjectPath('');
+      triggerHaptic([40, 30, 40]);
+    }
+  };
 
   useEffect(() => {
     if (chatMessages.length > 0) {
@@ -774,9 +804,34 @@ export default function App() {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: '#f4f4f5', letterSpacing: '-0.01em' }}>
-            {activeWorkspace ? activeWorkspace.name : 'Session Crash and Recovery'}
-          </span>
+          <button
+            onClick={() => {
+              setShowProjectDrawer(true);
+              triggerHaptic(20);
+            }}
+            title="Switch Workspace / Project"
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: '7px',
+              padding: '4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              color: '#f4f4f5',
+              fontSize: '13px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              letterSpacing: '-0.01em',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Folder size={13} color="#38bdf8" />
+            <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {activeWorkspace ? activeWorkspace.name : 'antigravity companion'}
+            </span>
+            <ChevronDown size={12} color="#94a3b8" />
+          </button>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -905,6 +960,196 @@ export default function App() {
           />
         </div>
       </header>
+
+      {/* Multi-Project Workspace Drawer */}
+      {showProjectDrawer && (
+        <div
+          onClick={() => setShowProjectDrawer(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 100,
+            background: 'rgba(0, 0, 0, 0.7)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            justifyContent: 'flex-start',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '85%',
+              maxWidth: '340px',
+              height: '100%',
+              background: '#090d16',
+              borderRight: '1px solid rgba(255, 255, 255, 0.1)',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '10px 0 30px rgba(0, 0, 0, 0.6)',
+            }}
+          >
+            {/* Drawer Header */}
+            <div
+              style={{
+                padding: '16px',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Folder size={18} color="#38bdf8" />
+                <span style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', letterSpacing: '-0.01em' }}>
+                  Workspaces
+                </span>
+              </div>
+              <button
+                onClick={() => setShowProjectDrawer(false)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  padding: '4px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Workspaces List */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '12px' }}>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  color: '#64748b',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  marginBottom: '8px',
+                  paddingLeft: '4px',
+                }}
+              >
+                Active Projects ({workspaces.length})
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {workspaces.map(ws => {
+                  const isActive = ws.id === (activeWorkspace?.id || activeWorkspaceId);
+                  return (
+                    <div
+                      key={ws.id}
+                      onClick={() => switchWorkspace(ws.id)}
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: isActive ? '#182238' : 'rgba(255, 255, 255, 0.03)',
+                        border: isActive ? '1px solid #38bdf8' : '1px solid rgba(255, 255, 255, 0.06)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: '13px', fontWeight: 600, color: isActive ? '#ffffff' : '#e2e8f0' }}>
+                          {ws.name}
+                        </span>
+                        {isActive && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              background: '#0284c7',
+                              color: '#ffffff',
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontWeight: 700,
+                            }}
+                          >
+                            ACTIVE
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          color: '#64748b',
+                          fontFamily: 'monospace',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {ws.path}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Add Project Form */}
+              <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255, 255, 255, 0.08)', paddingTop: '16px' }}>
+                <div
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: '#64748b',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                    marginBottom: '8px',
+                    paddingLeft: '4px',
+                  }}
+                >
+                  Attach Workspace
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <input
+                    type="text"
+                    value={newProjectPath}
+                    onChange={e => setNewProjectPath(e.target.value)}
+                    placeholder="e.g. D:\CODE\my-tv-box"
+                    style={{
+                      background: '#040711',
+                      border: '1px solid rgba(255, 255, 255, 0.12)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      fontSize: '12px',
+                      color: '#f8fafc',
+                      outline: 'none',
+                      fontFamily: 'monospace',
+                    }}
+                  />
+                  <button
+                    onClick={() => registerNewWorkspace(newProjectPath)}
+                    disabled={!newProjectPath.trim()}
+                    style={{
+                      background: newProjectPath.trim() ? '#2563eb' : '#1e293b',
+                      color: newProjectPath.trim() ? '#ffffff' : '#64748b',
+                      border: 'none',
+                      borderRadius: '6px',
+                      padding: '8px',
+                      fontSize: '12px',
+                      fontWeight: 600,
+                      cursor: newProjectPath.trim() ? 'pointer' : 'not-allowed',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <Plus size={14} />
+                    <span>Attach Workspace</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Settings Modal */}
       {showSettings && (

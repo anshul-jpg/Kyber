@@ -297,6 +297,31 @@ export class WsGateway {
         );
         break;
 
+      case 'client:register_workspace':
+        if (msg.path && fs.existsSync(msg.path)) {
+          this.workspaceManager.registerWorkspace(msg.path);
+          this.broadcast({
+            type: 'server:workspaces_updated',
+            workspaces: this.workspaceManager.listWorkspaces(),
+          });
+        }
+        break;
+
+      case 'client:switch_workspace': {
+        const targetWs = this.workspaceManager.getWorkspace(msg.workspaceId);
+        if (targetWs) {
+          const history = this.ideWatcher.getHistory();
+          ws.send(
+            JSON.stringify({
+              type: 'server:history',
+              workspaceId: targetWs.id,
+              messages: history,
+            })
+          );
+        }
+        break;
+      }
+
       case 'client:send_prompt': {
         const wsState = this.workspaceManager.getWorkspace(msg.workspaceId) || this.workspaceManager.listWorkspaces()[0];
         if (!wsState) return;
