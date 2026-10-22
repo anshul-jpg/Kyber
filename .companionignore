@@ -1,0 +1,13 @@
+# Antigravity Companion - Context Filter (.companionignore)
+# Filters heavy git diffs and noisy files from cellular / 5G companion transfers.
+
+node_modules/
+dist/
+build/
+.next/
+.turbo/
+*.log
+*.lock
+android/.gradle/
+android/app/build/
+package-lock.json

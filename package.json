@@ -7,10 +7,14 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspace=@agy-companion/protocol && npm run build --workspace=@agy-companion/cli && npm run build --workspace=@agy-companion/web",
+    "build": "npm run build --workspace=@agy-companion/protocol && npm run build --workspace=@agy-companion/cli && npm run build --workspace=@agy-companion/web && npm run build --workspace=antigravity-companion",
+    "build:ext": "npm run build --workspace=antigravity-companion",
+    "package:ext": "npm run package --workspace=antigravity-companion",
+    "install:ext": "npm run build:ext && npm run package:ext",
     "dev:cli": "npm run dev --workspace=@agy-companion/cli",
     "dev:web": "npm run dev --workspace=@agy-companion/web",
-    "start": "npm run start --workspace=@agy-companion/cli"
+    "start": "npm run start --workspace=@agy-companion/cli",
+    "test": "npm test --workspace=@agy-companion/protocol"
   },
   "keywords": [
     "antigravity",

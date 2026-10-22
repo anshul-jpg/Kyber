@@ -33,7 +33,7 @@ Never cut: validation at trust boundaries, error handling that prevents data los
 
 When designing or writing frontend code (website, companion web app, mobile APK, notifications, components):
 - **Zero "AI UI" Slop:** No purple/indigo gradient headers, no generic centered cards on light gray backgrounds, no oversized toy pill buttons with diffuse shadows, no unstyled monospace dumps.
-- **Aesthetic Fidelity:** Follow Linear / Raycast / Vercel craftsmanship. Use calibrated dark slate surfaces (`#090d16`, `#0f172a`, `#182238`), crisp 1px hairline borders (`rgba(255,255,255,0.08)`), tight typographic hierarchy (`Inter` / `Geist Mono`), high information density, and tactile feedback (`active:scale-[0.98]`).
+- **Aesthetic Fidelity:** 1:1 Antigravity IDE UI/UX Fidelity. Use official Antigravity dark theme neutral surfaces (`#181818` canvas, `#1f1f1f` - `#212121` panels/cards, `#262626` - `#282828` inputs/terminal, `#2d2d2d` - `#333333` selections) with Antigravity signature blue (`#0078d4` / `#007acc`), crisp 1px hairline borders (`rgba(255,255,255,0.08)`), tight typographic hierarchy (`Inter` / `Geist Mono`), high information density, and tactile feedback (`active:scale-[0.98]`). Zero dark navy / blue-tinted slate slop.
 - **Required Design Skills & Tooling:**
   1. Use `.agents/skills/design-craft/SKILL.md` for layout, anti-slop rules, and dark theme elevation.
   2. Use `.agents/skills/mobile-ux/SKILL.md` for touch ergonomics (44px tap targets, thumb zone, haptic feedback).
@@ -49,5 +49,22 @@ When the user says **"enable companion in this project"**, **"setup companion"**
    ```
 2. This creates `.agents/hooks.json` and `.agents/interceptor.js`, linking the workspace directly to the global companion mode (`~/.agy-companion-mode`) and companion daemon.
 3. Inform the user that the companion hook is enabled, and remind them that switching between Desk and Remote modes on their phone companion will immediately govern approvals in this project.
+
+## Companion Daemon Process Boundary & Zero Zombie Tasks
+- **Never spawn `agy-companion start` inside a chat turn via `run_command`:** Daemon lifecycle is managed exclusively by the Antigravity VS Code Extension (`antigravityCompanion.startDaemon`, `daemon-manager.ts`) or the user. Running persistent daemons as chat tasks pollutes the conversation state machine with background jobs, triggering unprompted `<SYSTEM_MESSAGE>` wakeups and locking user messages into "Queued Messages".
+- **Keep agent inspection queries synchronous:** Never push simple shell read/grep queries into background tasks. Run them with sufficient synchronous timeout (`WaitMsBeforeAsync: 10000`).
+
+## Core Philosophy: Ship Unfinished & The Open Connector Doctrine
+
+1. **Mindset ("Ship It Unfinished, Polish Later"):** Start doing, deliver the working baseline first to unblock real-world testing and team collaboration, and refine iteratively. Never stall progress seeking theoretical perfection.
+2. **Hierarchical Scopes & Sub-Roadmaps:** Every immediate task is a sub-roadmap connected to the larger product scope. Build modularly so every piece links smoothly into the macro architecture.
+3. **Open Connector Pattern in Every Module:** Every feature, route, and handler written must maintain an open connector, port, or hook interface:
+   - **Hardware Wake Connectors:** Host status and reconnection logic must expose hook points for **Wake-on-LAN (WoL)** magic packets and **Smart Plug** power automation (for sleeping/dormant PCs).
+   - **Multi-Agent Provider Extensibility:** Treat agents as modular providers (`AgentAdapter`). Never hardcode single-agent dead ends in `ws-gateway.ts` or `ipc-server.ts`.
+4. **Tri-Force Team Division (Private Repo):**
+   - **Stream 1 (Anshul + Antigravity):** Core daemon engine, Tailscale mesh, Android APK/foreground service (ID 9001), Antigravity adapter, multimodal voice notes, and recent projects hub.
+   - **Stream 2 (Collaborator 1):** Codex Companion adapter.
+   - **Stream 3 (Collaborator 2):** Claude Code Companion adapter.
+5. **Universal Rebranding Before Public Launch:** Codebase is evolving into a universal remote coding companion; keep provider abstractions clean ahead of official branding and public GitHub release.
 
 (Yes, this file also applies to agents working on the ponytail repo itself. Especially to them.)

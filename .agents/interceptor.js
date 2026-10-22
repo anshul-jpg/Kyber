@@ -3,33 +3,21 @@
 /**
  * Antigravity Companion - PreToolUse Lifecycle Hook
  *
- * This hook is called by Antigravity CLI before executing tools.
- * It reads the toolCall from stdin, queries the local Companion daemon,
- * and outputs the decision to stdout.
- *
- * If the Companion daemon is offline or times out, it gracefully falls back
- * to "ask" so that the standard terminal prompt functions normally.
+ * Intercepts tool calls before execution.
+ * - In Desk Mode: signals IDE to show native desktop prompt ('force_ask').
+ * - In Remote Mode: pushes prompt to phone companion and waits for 'Allow'/'Deny'.
  */
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
-
-const LOG_FILE = path.resolve(__dirname, 'hook_debug.log');
-
-function logDebug(msg) {
-  try {
-    fs.appendFileSync(LOG_FILE, `[${new Date().toISOString()}] ${msg}\n`);
-  } catch {}
-}
+const os = require('os');
 
 async function readStdin() {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => {
-      data += chunk;
-    });
+    process.stdin.on('data', chunk => { data += chunk; });
     process.stdin.on('end', () => {
       try {
         resolve(data.trim() ? JSON.parse(data) : {});
@@ -41,8 +29,8 @@ async function readStdin() {
   });
 }
 
-function postToDaemon(payload, timeoutMs = 3600000) {
-  return new Promise((resolve, reject) => {
+function postToDaemon(payload, timeoutMs = 130000) {
+  return new Promise((resolve) => {
     const postData = JSON.stringify(payload);
     const req = http.request(
       {
@@ -58,14 +46,12 @@ function postToDaemon(payload, timeoutMs = 3600000) {
       },
       res => {
         let responseData = '';
-        res.on('data', chunk => {
-          responseData += chunk;
-        });
+        res.on('data', chunk => { responseData += chunk; });
         res.on('end', () => {
           try {
             resolve(JSON.parse(responseData));
           } catch (e) {
-            resolve({ decision: 'ask', reason: 'Failed to parse daemon response' });
+            resolve({ decision: 'force_ask', reason: 'Failed to parse daemon response' });
           }
         });
       }
@@ -73,12 +59,11 @@ function postToDaemon(payload, timeoutMs = 3600000) {
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ decision: 'ask', reason: 'Mobile approval timed out. Falling back to terminal.' });
+      resolve({ decision: 'force_ask', reason: 'Mobile approval timed out. Falling back to terminal prompt.' });
     });
 
-    req.on('error', err => {
-      // Companion daemon is not running; gracefully fall back to terminal prompt
-      resolve({ decision: 'ask', reason: 'Companion daemon not active.' });
+    req.on('error', () => {
+      resolve({ decision: 'force_ask', reason: 'Companion daemon not active.' });
     });
 
     req.write(postData);
@@ -86,62 +71,127 @@ function postToDaemon(payload, timeoutMs = 3600000) {
   });
 }
 
+function getAutoModeResolution() {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: 4040,
+        path: '/api/health',
+        method: 'GET',
+        timeout: 350,
+      },
+      res => {
+        let data = '';
+        res.on('data', c => { data += c; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json.connectedPhoneCount > 0 ? 'remote' : 'desk');
+          } catch {
+            resolve('desk');
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve('desk'));
+    req.on('timeout', () => { req.destroy(); resolve('desk'); });
+    req.end();
+  });
+}
+
 async function main() {
   try {
     const hookContext = await readStdin();
-    logDebug(`Hook invoked with context: ${JSON.stringify(hookContext)}`);
+    try {
+      fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} Hook invoked: ${JSON.stringify(hookContext)}\n`);
+    } catch {}
 
-    // Check if toolCall is present
     if (!hookContext.toolCall) {
-      logDebug('No toolCall in context, allowing');
       process.stdout.write(JSON.stringify({ decision: 'allow' }));
       process.exit(0);
       return;
     }
 
-    // Read mode file: check local workspace override first, fallback to global user home
-    const os = require('os');
-    const localModeFile = path.resolve(__dirname, 'companion-mode');
-    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
-    let mode = 'remote';
-    if (fs.existsSync(localModeFile)) {
-      mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
-    } else if (fs.existsSync(globalModeFile)) {
-      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
+    // 1. Check Global Execution Policy (Autonomous vs Supervised)
+    const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
+    let policy = 'force_ask';
+    if (fs.existsSync(globalPolicyFile)) {
+      policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
     }
-
-    // Only gate run_command; auto-allow everything else so agent never hangs on file edits/reads
-    if (hookContext.toolCall.name !== 'run_command') {
-      logDebug(`Auto-allowing non-run_command tool: ${hookContext.toolCall.name}`);
+    if (policy === 'always_proceed') {
       process.stdout.write(JSON.stringify({ decision: 'allow' }));
       process.exit(0);
       return;
     }
 
-    // Desk mode: force IDE to show its own native Allow/Deny dialog, no phone involved
-    if (mode === 'desk') {
-      logDebug('Desk mode — returning force_ask for IDE native prompt');
-      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
-      process.exit(0);
-      return;
-    }
-
-    // Auto-allow build/bundle operations within the companion project
+    const toolName = hookContext.toolCall.name || '';
     const cmd = hookContext.toolCall?.args?.CommandLine || '';
-    if (cmd.includes('npm run build') || cmd.includes('vite build') || cmd.includes('tsc')) {
-      logDebug(`Auto-allowing internal build command: ${cmd}`);
+
+    // Safe read tools that should never stall the agent
+    const SAFE_READ_TOOLS = new Set([
+      'view_file',
+      'list_dir',
+      'grep_search',
+      'read_url_content',
+      'read_resource',
+      'list_resources',
+      'schedule',
+      'manage_task',
+    ]);
+    if (SAFE_READ_TOOLS.has(toolName)) {
+      process.stdout.write(JSON.stringify({ decision: 'allow' }));
+      process.exit(0);
+      return;
+    }
+
+    // Auto-allow read-only git queries so agent isn't spammed during background git checks
+    if (
+      toolName === 'run_command' &&
+      (cmd.trim() === 'git status' ||
+        cmd.trim() === 'git diff' ||
+        cmd.trim() === 'git log' ||
+        cmd.trim().startsWith('git status '))
+    ) {
       process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: [`command(${cmd})`] }));
       process.exit(0);
       return;
     }
 
-    // Forward to companion daemon for mobile approval
-    logDebug(`Posting to daemon: ${hookContext.toolCall.name}`);
-    const result = await postToDaemon(hookContext);
-    logDebug(`Daemon returned: ${JSON.stringify(result)}`);
+    // 2. Check Companion Mode (Desk vs Remote vs Auto vs Autonomous)
+    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
+    const localModeFile = path.resolve(__dirname, 'companion-mode');
+    let mode = 'remote';
+    if (fs.existsSync(globalModeFile)) {
+      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
+    } else if (fs.existsSync(localModeFile)) {
+      mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
+    }
 
+    // Autonomous mode: completely hands-off, auto-allow every tool immediately with zero prompts
+    if (mode === 'autonomous') {
+      const overrides = cmd ? [`command(${cmd})`] : [];
+      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
+      process.exit(0);
+      return;
+    }
+
+    if (mode === 'auto') {
+      mode = await getAutoModeResolution();
+    }
+
+    // Desk mode: force IDE desktop prompt, ignoring cached 'always allow' permissions
+    if (mode === 'desk') {
+      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
+      process.exit(0);
+      return;
+    }
+
+    // Remote mode: push to phone companion and wait for Allow/Deny
+    const result = await postToDaemon(hookContext);
     if (result && result.decision === 'allow') {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
+      const overrides = result.permissionOverrides || (cmd ? [`command(${cmd})`] : []);
+      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
       process.exit(0);
       return;
     }
@@ -149,14 +199,7 @@ async function main() {
     process.stdout.write(JSON.stringify(result));
     process.exit(0);
   } catch (error) {
-    logDebug(`Hook error: ${error.message}`);
-    // Fail-safe: Always fall back to "ask" on any unexpected error
-    process.stdout.write(
-      JSON.stringify({
-        decision: 'ask',
-        reason: `Hook error: ${error.message}`,
-      })
-    );
+    process.stdout.write(JSON.stringify({ decision: 'force_ask', reason: error.message }));
     process.exit(0);
   }
 }

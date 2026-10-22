@@ -43,7 +43,7 @@ async function readStdin() {
   });
 }
 
-function postToDaemon(payload, timeoutMs = 3600000) {
+function postToDaemon(payload, timeoutMs = 130000) {
   return new Promise((resolve) => {
     const postData = JSON.stringify(payload);
     const req = http.request(
@@ -67,7 +67,7 @@ function postToDaemon(payload, timeoutMs = 3600000) {
           try {
             resolve(JSON.parse(responseData));
           } catch (e) {
-            resolve({ decision: 'ask', reason: 'Failed to parse daemon response' });
+            resolve({ decision: 'force_ask', reason: 'Failed to parse daemon response' });
           }
         });
       }
@@ -75,15 +75,44 @@ function postToDaemon(payload, timeoutMs = 3600000) {
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ decision: 'ask', reason: 'Mobile approval timed out. Falling back to terminal.' });
+      resolve({ decision: 'force_ask', reason: 'Mobile approval timed out. Falling back to terminal prompt.' });
     });
 
     req.on('error', () => {
       // Companion daemon is not running; gracefully fall back to terminal prompt
-      resolve({ decision: 'ask', reason: 'Companion daemon not active.' });
+      resolve({ decision: 'force_ask', reason: 'Companion daemon not active.' });
     });
 
     req.write(postData);
+    req.end();
+  });
+}
+
+function getAutoModeResolution() {
+  return new Promise((resolve) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: 4040,
+        path: '/api/health',
+        method: 'GET',
+        timeout: 350,
+      },
+      res => {
+        let data = '';
+        res.on('data', c => { data += c; });
+        res.on('end', () => {
+          try {
+            const json = JSON.parse(data);
+            resolve(json.connectedPhoneCount > 0 ? 'remote' : 'desk');
+          } catch {
+            resolve('desk');
+          }
+        });
+      }
+    );
+    req.on('error', () => resolve('desk'));
+    req.on('timeout', () => { req.destroy(); resolve('desk'); });
     req.end();
   });
 }
@@ -98,35 +127,73 @@ async function main() {
       return;
     }
 
-    // Read mode file: check local workspace override first, fallback to global user home
-    const localModeFile = path.resolve(__dirname, 'companion-mode');
-    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
-    let mode = 'remote';
-    if (fs.existsSync(localModeFile)) {
-      mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
-    } else if (fs.existsSync(globalModeFile)) {
-      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
+    // 1. Global execution policy (autonomous vs supervised)
+    const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
+    let policy = 'force_ask';
+    if (fs.existsSync(globalPolicyFile)) {
+      policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
     }
-
-    // Only gate run_command; auto-allow others so agent never hangs on file edits/reads
-    if (hookContext.toolCall.name !== 'run_command') {
+    if (policy === 'always_proceed') {
+      logDebug('Execution policy is always_proceed — auto-allowing tool');
       process.stdout.write(JSON.stringify({ decision: 'allow' }));
       process.exit(0);
       return;
     }
 
-    // Desk mode: force IDE to show its own native Allow/Deny dialog
-    if (mode === 'desk') {
-      logDebug('Desk mode — returning force_ask for IDE native prompt');
-      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
+    const toolName = hookContext.toolCall?.name || '';
+    const cmd = hookContext.toolCall?.args?.CommandLine || '';
+
+    // Safe read tools that should never stall the agent
+    const SAFE_READ_TOOLS = new Set([
+      'view_file',
+      'list_dir',
+      'grep_search',
+      'read_url_content',
+      'read_resource',
+      'list_resources',
+      'schedule',
+      'manage_task',
+    ]);
+    if (SAFE_READ_TOOLS.has(toolName)) {
+      process.stdout.write(JSON.stringify({ decision: 'allow' }));
       process.exit(0);
       return;
     }
 
-    // Auto-allow internal build/bundle operations
-    const cmd = hookContext.toolCall?.args?.CommandLine || '';
-    if (cmd.includes('npm run build') || cmd.includes('vite build') || cmd.includes('tsc')) {
+    // Auto-allow only read-only git queries so agent isn't spammed during background git checks
+    if (
+      toolName === 'run_command' &&
+      (cmd.trim() === 'git status' ||
+        cmd.trim() === 'git diff' ||
+        cmd.trim() === 'git log' ||
+        cmd.trim().startsWith('git status '))
+    ) {
+      logDebug(\`Auto-allowing safe read query: \${cmd}\`);
       process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: [\`command(\${cmd})\`] }));
+      process.exit(0);
+      return;
+    }
+
+    // 2. Global mode file ~/.agy-companion-mode is the primary authority for remote/desk mode
+    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
+    const localModeFile = path.resolve(__dirname, 'companion-mode');
+    let mode = 'remote';
+    if (fs.existsSync(globalModeFile)) {
+      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
+    } else if (fs.existsSync(localModeFile)) {
+      mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
+    }
+
+    // Auto mode: dynamic resolution based on whether a phone is connected
+    if (mode === 'auto') {
+      mode = await getAutoModeResolution();
+      logDebug(\`Auto mode dynamically resolved to: \${mode}\`);
+    }
+
+    // Desk mode: force IDE desktop prompt, ignoring cached 'always allow' permissions
+    if (mode === 'desk') {
+      logDebug('Desk mode — returning force_ask for IDE native handling');
+      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
       process.exit(0);
       return;
     }
@@ -134,7 +201,8 @@ async function main() {
     // Forward to companion daemon for mobile approval
     const result = await postToDaemon(hookContext);
     if (result && result.decision === 'allow') {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
+      const overrides = result.permissionOverrides || (cmd ? [\`command(\${cmd})\`] : []);
+      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
       process.exit(0);
       return;
     }
@@ -157,12 +225,17 @@ main();
 
 const HOOKS_JSON_CONTENT = JSON.stringify(
   {
-    hooks: {
+    "companion-interceptor": {
       PreToolUse: [
         {
-          matcher: "run_command",
-          command: "node",
-          args: [".agents/interceptor.js"]
+          matcher: "run_command|write_to_file|replace_file_content|multi_replace_file_content",
+          hooks: [
+            {
+              type: "command",
+              command: "node .agents/interceptor.js",
+              timeout: 130
+            }
+          ]
         }
       ]
     }

@@ -2,10 +2,10 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.antigravity.companion',
-  appName: 'Antigravity Companion',
+  appName: 'KYBER',
   webDir: 'dist',
   server: {
-    androidScheme: 'https',
+    androidScheme: 'http',
     cleartext: true,
   },
   backgroundColor: '#181818',

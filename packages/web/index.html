@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none'%3E%3Cpolygon points='48.5,18 22,58 48.5,98' fill='%23ffffff'/%3E%3Cpolygon points='51.5,2 78,42 51.5,82' fill='%23a1a1aa'/%3E%3C/svg%3E" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#181818" />
-    <title>Antigravity Companion</title>
+    <title>KYBER</title>
     <style>
       :root {
         --sat: env(safe-area-inset-top, 0px);
@@ -22,7 +22,7 @@
       html, body {
         height: 100%;
         width: 100%;
-        background-color: #181818;
+        background-color: #141414;
         color: #e2e8f0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
@@ -33,6 +33,194 @@
         width: 100%;
         display: flex;
         flex-direction: column;
+      }
+
+      /* Custom mobile scrollbar */
+      ::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.15);
+        border-radius: 4px;
+      }
+
+      /* Standardized Scalable Mobile Typography */
+      .prose-antigravity {
+        color: #d4d4d4;
+        font-size: clamp(13.5px, 3.8vw, 15px);
+        line-height: 1.6;
+        letter-spacing: -0.01em;
+        word-break: normal;
+        overflow-wrap: break-word;
+        max-width: 100%;
+      }
+
+      .prose-antigravity h1 {
+        font-size: clamp(17px, 4.5vw, 20px);
+        font-weight: 700;
+        color: #ffffff;
+        margin: 20px 0 10px 0;
+        line-height: 1.35;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        padding-bottom: 6px;
+      }
+
+      .prose-antigravity h2 {
+        font-size: clamp(15.5px, 4vw, 17.5px);
+        font-weight: 600;
+        color: #ffffff;
+        margin: 18px 0 8px 0;
+        line-height: 1.35;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        padding-bottom: 4px;
+      }
+
+      .prose-antigravity h3 {
+        font-size: clamp(14px, 3.6vw, 15.5px);
+        font-weight: 600;
+        color: #f1f5f9;
+        margin: 14px 0 6px 0;
+        line-height: 1.4;
+      }
+
+      .prose-antigravity p {
+        margin: 8px 0;
+        line-height: 1.6;
+      }
+
+      .prose-antigravity ul,
+      .prose-antigravity ol {
+        margin: 8px 0;
+        padding-left: 22px;
+      }
+
+      .prose-antigravity li {
+        margin: 4px 0;
+        line-height: 1.55;
+      }
+
+      .prose-antigravity strong {
+        font-weight: 600;
+        color: #ffffff;
+      }
+
+      .prose-antigravity a {
+        color: #38bdf8;
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        word-break: break-all;
+      }
+
+      .prose-antigravity hr {
+        border: none;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        margin: 16px 0;
+      }
+
+      .prose-antigravity blockquote {
+        border-left: 3px solid #0078d4;
+        background: rgba(0, 120, 212, 0.08);
+        padding: 8px 12px;
+        margin: 12px 0;
+        border-radius: 0 6px 6px 0;
+        color: #94a3b8;
+      }
+
+      .prose-antigravity code {
+        font-family: 'Geist Mono', Consolas, 'Fira Code', monospace;
+        font-size: 12.5px;
+        background: rgba(255, 255, 255, 0.08);
+        color: #93c5fd;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+
+      .prose-antigravity pre {
+        margin: 12px 0;
+        padding: 12px 14px;
+        background: #101010;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        max-width: 100%;
+      }
+
+      .prose-antigravity pre code {
+        background: transparent;
+        padding: 0;
+        color: #e2e8f0;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre;
+      }
+
+      /* Responsive Touch-Scrollable Markdown Tables (Zero Crushed Words) */
+      .prose-antigravity table {
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-collapse: collapse;
+        margin: 14px 0;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        background: #181818;
+      }
+
+      .prose-antigravity thead {
+        background: rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+      }
+
+      .prose-antigravity th {
+        padding: 10px 14px;
+        font-size: 12px;
+        font-weight: 600;
+        color: #f8fafc;
+        text-align: left;
+        white-space: nowrap;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+      }
+
+      .prose-antigravity td {
+        padding: 10px 14px;
+        font-size: 13.5px;
+        line-height: 1.5;
+        color: #cbd5e1;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        border-right: 1px solid rgba(255, 255, 255, 0.06);
+        min-width: 135px;
+        white-space: normal;
+        word-break: normal;
+        overflow-wrap: normal;
+        vertical-align: top;
+      }
+
+      .prose-antigravity td:first-child {
+        font-weight: 500;
+        color: #f1f5f9;
+        min-width: 105px;
+      }
+
+      .prose-antigravity tr:last-child td {
+        border-bottom: none;
+      }
+
+      .prose-antigravity td:last-child,
+      .prose-antigravity th:last-child {
+        border-right: none;
+      }
+
+      .prose-antigravity tr:nth-child(even) td {
+        background: rgba(255, 255, 255, 0.015);
       }
     </style>
   </head>

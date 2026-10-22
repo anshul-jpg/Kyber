@@ -1,0 +1,240 @@
+{
+  "name": "antigravity-companion",
+  "displayName": "KYBER",
+  "description": "Autonomous Pocket Supervisor & Tool Gatekeeper for Antigravity, Codex & Claude Code",
+  "version": "0.1.0",
+  "publisher": "antigravity",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "package": "npm run build && npx @vscode/vsce package --no-dependencies"
+  },
+  "dependencies": {
+    "@agy-companion/protocol": "^0.1.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/qrcode": "^1.5.5",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.14",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.8.0"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "antigravityCompanion.startDaemon",
+        "title": "Start Companion Daemon",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.stopDaemon",
+        "title": "Stop Companion Daemon",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.restartDaemon",
+        "title": "Restart Companion Daemon",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.toggleMode",
+        "title": "Toggle Desk/Remote Mode",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.clearApprovals",
+        "title": "Clear All Pending Approvals",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.restartExtensionHost",
+        "title": "Hot-Reload Extension Host (Keep Window & Chat Context)",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.masterStartAndLink",
+        "title": "Master Start & Link Companion",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.enableInWorkspace",
+        "title": "Enable Companion in Current Workspace",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.disableInWorkspace",
+        "title": "Disable Companion in Current Workspace",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.showPairing",
+        "title": "Show Pairing QR Code & Ticket",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.openSettings",
+        "title": "Open Companion Settings",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.setCloudflareToken",
+        "title": "Set Cloudflare Tunnel Secret Token",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.clearCloudflareToken",
+        "title": "Clear Cloudflare Tunnel Secret Token",
+        "category": "Antigravity"
+      },
+      {
+        "command": "antigravityCompanion.runQuickAction",
+        "title": "Execute Quick Action Command",
+        "category": "Antigravity"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "antigravity-companion",
+          "title": "KYBER",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "antigravity-companion": [
+        {
+          "type": "webview",
+          "id": "antigravityCompanion.sidebar",
+          "name": "KYBER Hub",
+          "icon": "media/icon.svg",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "KYBER",
+      "properties": {
+        "antigravityCompanion.autoStart": {
+          "type": "string",
+          "enum": [
+            "always",
+            "workspace",
+            "manual"
+          ],
+          "default": "always",
+          "description": "Dictates when the companion daemon boots ('always': on IDE launch; 'workspace': only when workspace has companion hook installed; 'manual': manual start only)."
+        },
+        "antigravityCompanion.defaultMode": {
+          "type": "string",
+          "enum": [
+            "remote",
+            "desk",
+            "auto"
+          ],
+          "default": "remote",
+          "description": "Connection priority mode (remote: phone approval priority; desk: local PC dialogs; auto: automatically use remote when phone is connected, desk otherwise)."
+        },
+        "antigravityCompanion.idleTimeoutMinutes": {
+          "type": "number",
+          "default": 0,
+          "description": "Automatically kill the companion daemon after X minutes of inactivity to save RAM & phone battery (0 = disabled)."
+        },
+        "antigravityCompanion.enableCompanionIgnore": {
+          "type": "boolean",
+          "default": true,
+          "description": "Filter noisy git diffs and logs matching .companionignore before sending to phone companion to conserve 5G bandwidth."
+        },
+        "antigravityCompanion.quickActions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string",
+                "description": "Button label displayed in sidebar and phone UI."
+              },
+              "command": {
+                "type": "string",
+                "description": "Shell command to execute in the IDE integrated terminal."
+              }
+            },
+            "required": [
+              "label",
+              "command"
+            ]
+          },
+          "default": [
+            {
+              "label": "Run Build",
+              "command": "npm run build"
+            },
+            {
+              "label": "Run Tests",
+              "command": "npm test"
+            },
+            {
+              "label": "Start Dev Server",
+              "command": "npm run dev"
+            }
+          ],
+          "description": "Customizable quick-action terminal buttons pushed to the phone UI and sidebar dashboard for one-tap remote execution."
+        },
+        "antigravityCompanion.gatewayPort": {
+          "type": "number",
+          "default": 4040,
+          "description": "Port used for the Web/PWA Gateway and WebSocket server."
+        },
+        "antigravityCompanion.ipcPort": {
+          "type": "number",
+          "default": 4041,
+          "description": "Port used for the PreToolUse Hook IPC TCP server."
+        },
+        "antigravityCompanion.wakePort": {
+          "type": "number",
+          "default": 4049,
+          "description": "Port used for sub-second wake triggers."
+        },
+        "antigravityCompanion.tunnelProvider": {
+          "type": "string",
+          "enum": [
+            "cloudflare",
+            "tailscale",
+            "none"
+          ],
+          "default": "none",
+          "description": "Remote network access provider (Cloudflare Quick Tunnel, Tailscale Mesh VPN, or LAN only)."
+        },
+        "antigravityCompanion.failClosedTimeout": {
+          "type": "number",
+          "default": 120,
+          "description": "Seconds to wait for a phone decision before falling back to native desktop IDE prompt."
+        },
+        "antigravityCompanion.soundAlerts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Play an alert sound when a tool approval request arrives."
+        },
+        "antigravityCompanion.showToastNotifications": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show bottom-right toast notification popups in the IDE for tool approval requests. When false, approvals only appear in the Companion extension sidebar and on your phone."
+        }
+      }
+    }
+  }
+}

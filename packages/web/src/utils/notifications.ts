@@ -41,9 +41,9 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return false;
 }
 
-// Register notification actions with Approve and Reject buttons
+// Register notification actions with Allow and Deny buttons
 export async function initNotificationActions(
-  onAction?: (actionId: string, requestId?: string) => void
+  onAction?: (actionId: 'allow' | 'deny', requestId?: string) => void
 ): Promise<void> {
   try {
     await LocalNotifications.registerActionTypes({
@@ -51,57 +51,135 @@ export async function initNotificationActions(
         {
           id: 'PERMISSION_GATE',
           actions: [
-            { id: 'approve', title: '✓ Approve', foreground: false },
-            { id: 'deny', title: '✕ Reject', foreground: false, destructive: true },
+            { id: 'allow', title: 'Allow', foreground: false },
+            { id: 'deny', title: 'Deny', foreground: false, destructive: true },
           ],
         },
       ],
     });
 
     if (onAction) {
+      await LocalNotifications.removeAllListeners();
       await LocalNotifications.addListener('localNotificationActionPerformed', (action) => {
         const requestId = action.notification.extra?.requestId;
-        onAction(action.actionId, requestId);
+        if (action.actionId === 'allow' || action.actionId === 'deny') {
+          onAction(action.actionId, requestId);
+          try {
+            LocalNotifications.cancel({ notifications: [{ id: action.notification.id }] });
+          } catch {}
+          try {
+            if ((window as any).AndroidHost?.minimizeApp) {
+              (window as any).AndroidHost.minimizeApp();
+            }
+          } catch {}
+        }
       });
     }
   } catch {}
 }
 
-export async function dispatchApprovalNotification(
-  toolName: string,
-  command: string,
-  requestId?: string
-): Promise<void> {
-  // Play alert audio
-  playAlertSound();
+export const SINGLE_PERSISTENT_NOTIFICATION_ID = 9001;
 
-  const title = `🔔 Approval: ${toolName}`;
-  const body = command.length > 80 ? `${command.slice(0, 80)}...` : command;
+// Clean raw Markdown symbols, links, and code fences into smooth, human-readable notification text
+export function sanitizeNotificationText(raw: string): string {
+  if (!raw) return '';
+  return raw
+    // Convert markdown links [Text](url) -> Text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Remove raw file URLs (e.g. file:///d:/...)
+    .replace(/file:\/\/\/[^\s)]+/g, '')
+    // Remove markdown headers #, ##, ###
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove bold/italics **text** or *text*
+    .replace(/\*{1,3}([^*]+)\*{1,3}/g, '$1')
+    .replace(/_{1,3}([^_]+)_{1,3}/g, '$1')
+    // Remove inline code backticks `code` -> code
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove code blocks ```...``` -> [Code snippet]
+    .replace(/```[\s\S]*?```/g, '[Code snippet]')
+    // Remove blockquotes >
+    .replace(/^>\s+/gm, '')
+    // Remove markdown bullets - , * , +
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    // Remove numbered lists 1. 2.
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // Collapse newlines and multiple spaces into clean readable prose
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
 
-  // 1. Try Capacitor Native Android LocalNotification with inline action buttons
-  try {
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          title,
-          body,
-          id: Math.floor(Math.random() * 100000),
-          actionTypeId: 'PERMISSION_GATE',
-          extra: { requestId },
-        },
-      ],
-    });
+// Updates the ONE single persistent notification in-place (zero notification spam)
+export function updatePersistentCompanionNotification(
+  title: string,
+  content: string,
+  requestId?: string,
+  isAlert: boolean = false,
+  subtext?: string
+): void {
+  const cleanTitle = sanitizeNotificationText(title);
+  const cleanContent = sanitizeNotificationText(content);
+
+  // 1. Android APK: update the ongoing foreground service notification directly
+  if (typeof window !== 'undefined' && (window as any).AndroidHost?.updatePersistentNotification) {
+    (window as any).AndroidHost.updatePersistentNotification(
+      cleanTitle,
+      cleanContent,
+      requestId || null,
+      isAlert,
+      subtext || 'Remote Active'
+    );
     return;
-  } catch {}
+  }
 
-  // 2. Fallback to Web Browser / PWA Notification
+  // 2. Web / PWA fallback: use the exact same tag 'antigravity-live-status' so it updates in place!
   if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
     try {
-      new Notification(title, {
-        body,
+      new Notification(cleanTitle, {
+        body: cleanContent,
         icon: '/favicon.ico',
-        tag: 'antigravity-approval',
+        tag: 'antigravity-live-status',
       });
     } catch {}
   }
+}
+
+export async function dispatchApprovalNotification(
+  requestId: string,
+  toolName: string,
+  command: string
+): Promise<void> {
+  playAlertSound();
+
+  const cleanCmd = sanitizeNotificationText(command);
+  const body = cleanCmd.length > 100 ? `${cleanCmd.slice(0, 100)}...` : cleanCmd;
+  const friendlyTool = toolName ? toolName.replace(/^[a-z_]+:/, '').replace(/_/g, ' ') : 'Action';
+  const title = `Approval Required: ${friendlyTool}`;
+
+  // Update the single persistent foreground notification with inline [Allow] [Deny] buttons & alert
+  updatePersistentCompanionNotification(title, body, requestId, true, 'Gate Paused');
+
+  // Fallback to LocalNotification with fixed ID (never random) if not in AndroidHost
+  if (typeof window === 'undefined' || !(window as any).AndroidHost) {
+    try {
+      await LocalNotifications.schedule({
+        notifications: [
+          {
+            title,
+            body,
+            id: SINGLE_PERSISTENT_NOTIFICATION_ID,
+            actionTypeId: 'PERMISSION_GATE',
+            extra: { requestId },
+          },
+        ],
+      });
+    } catch {}
+  }
+}
+
+export function clearApprovalNotification(): void {
+  updatePersistentCompanionNotification('Remote Active', 'Supervising workspace — Ready', undefined, false, 'Antigravity IDE');
+  try {
+    LocalNotifications.cancel({ notifications: [{ id: SINGLE_PERSISTENT_NOTIFICATION_ID }] });
+  } catch {}
 }

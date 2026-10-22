@@ -3,14 +3,14 @@
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { spawn } from 'child_process';
 import qrcode from 'qrcode-terminal';
 import cloudflared from 'cloudflared';
-import { DEFAULT_DAEMON_PORT, HOOK_IPC_PORT } from '@agy-companion/protocol';
+import { DEFAULT_DAEMON_PORT, HOOK_IPC_PORT, encodePairingTicket, PairingTicket } from '@agy-companion/protocol';
 import { HookIpcServer } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
 import { WsGateway } from '../server/ws-gateway.js';
-import { AgyEngine } from '../engine/agy-engine.js';
 import { installHook } from '../commands/install-hook.js';
 
 interface NetworkAddresses {
@@ -50,20 +50,41 @@ function getNetworkAddresses(): NetworkAddresses {
   };
 }
 
-async function startCloudflareTunnel(port: number): Promise<{ url: string; stop: () => void } | null> {
+async function startCloudflareTunnel(port: number, token?: string): Promise<{ url: string; stop: () => void } | null> {
   return new Promise(async resolve => {
     try {
-      console.log('[Tunnel] Launching Cloudflare quick tunnel (worldwide HTTPS)...');
       let binPath = (cloudflared as any).bin;
       if (!binPath || !fs.existsSync(binPath)) {
         binPath = await (cloudflared as any).install((cloudflared as any).DEFAULT_CLOUDFLARED_BIN);
       }
 
-      const proc = spawn(binPath, ['tunnel', '--url', `http://127.0.0.1:${port}`], {
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
+      let proc: any;
       let resolved = false;
+
+      if (token) {
+        console.log('[Tunnel] Launching Cloudflare named tunnel with secure token...');
+        proc = spawn(binPath, ['tunnel', 'run', '--token', token], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        // Named tunnels route through user's preconfigured Cloudflare domain
+        setTimeout(() => {
+          if (!resolved) {
+            resolved = true;
+            resolve({
+              url: 'https://cloudflare-tunnel.user-configured.net',
+              stop: () => {
+                try { proc.kill(); } catch {}
+              },
+            });
+          }
+        }, 3000);
+      } else {
+        console.log('[Tunnel] Launching Cloudflare quick tunnel (worldwide HTTPS)...');
+        proc = spawn(binPath, ['tunnel', '--url', `http://127.0.0.1:${port}`], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+      }
+
       const parseOutput = (data: Buffer) => {
         const text = data.toString();
         const match = text.match(/https:\/\/[a-zA-Z0-9-]+\.trycloudflare\.com/i);
@@ -87,7 +108,7 @@ async function startCloudflareTunnel(port: number): Promise<{ url: string; stop:
         if (!resolved) resolve(null);
       }, 15000);
     } catch (err) {
-      console.error('[Tunnel] Failed to launch Cloudflare quick tunnel:', err);
+      console.error('[Tunnel] Failed to launch Cloudflare tunnel:', err);
       resolve(null);
     }
   });
@@ -120,19 +141,41 @@ Options:
     process.exit(0);
   }
 
+function getOrCreateAuthToken(): string {
+  const tokenPath = path.resolve(os.homedir(), '.agy-companion-token');
+  try {
+    if (fs.existsSync(tokenPath)) {
+      const token = fs.readFileSync(tokenPath, 'utf8').trim();
+      if (token.length >= 16) return token;
+    }
+    const newToken = crypto.randomBytes(16).toString('hex');
+    fs.writeFileSync(tokenPath, newToken, 'utf8');
+    return newToken;
+  } catch {
+    return 'companion_persistent_token_default';
+  }
+}
+
   const { localIp, tailscaleIp } = getNetworkAddresses();
   const currentDir = process.cwd();
-  const wantTunnel = args.includes('--tunnel');
+  
+  const portIdx = args.indexOf('--port');
+  const daemonPort = portIdx !== -1 && args[portIdx + 1] ? parseInt(args[portIdx + 1], 10) : DEFAULT_DAEMON_PORT;
+
+  const cfTokenIdx = args.indexOf('--cloudflare-token');
+  const cloudflareToken = cfTokenIdx !== -1 && args[cfTokenIdx + 1] ? args[cfTokenIdx + 1] : undefined;
+
+  const wantTunnel = args.includes('--tunnel') || !!cloudflareToken;
+  const authToken = getOrCreateAuthToken();
 
   console.log('\n===========================================================');
-  console.log('       🚀 ANTIGRAVITY COMPANION DAEMON (v0.1.0)');
+  console.log('       ANTIGRAVITY COMPANION DAEMON (v0.1.0)');
   console.log('      "Cloud Gaming, but for Cloud Coding"');
   console.log('===========================================================\n');
 
   const hookIpc = new HookIpcServer(HOOK_IPC_PORT);
   const workspaceManager = new WorkspaceManager();
-  const agyEngine = new AgyEngine();
-  const wsGateway = new WsGateway(hookIpc, workspaceManager, agyEngine, DEFAULT_DAEMON_PORT);
+  const wsGateway = new WsGateway(hookIpc, workspaceManager, daemonPort);
 
   // Register current workspace
   const activeWs = workspaceManager.registerWorkspace(currentDir);
@@ -140,51 +183,116 @@ Options:
   await hookIpc.start();
   await wsGateway.start();
 
+  console.log(`
+       ▲
+      /|
+     / |   KYBER
+     \\ |   Autonomous Pocket Supervisor
+      \\|
+       ▼
+  `);
   console.log(`[IPC] Hook listener active on:       http://127.0.0.1:${HOOK_IPC_PORT}`);
   console.log(`[WS]  Mobile gateway active on:     ws://${localIp}:${DEFAULT_DAEMON_PORT}`);
   console.log(`[WS]  Workspace registered:         ${activeWs.name} (${activeWs.path})\n`);
 
-  const localMobileUrl = `http://${localIp}:${DEFAULT_DAEMON_PORT}/?host=${localIp}&port=${DEFAULT_DAEMON_PORT}&ws=${activeWs.id}`;
+  // 1. Local Wi-Fi Ticket
+  const localTicket = encodePairingTicket({
+    version: 1,
+    host: localIp,
+    port: DEFAULT_DAEMON_PORT,
+    ssl: false,
+    token: authToken,
+    workspaceId: activeWs.id,
+  });
+  const localMobileUrl = `http://${localIp}:${DEFAULT_DAEMON_PORT}/?ticket=${localTicket}`;
 
   console.log('-----------------------------------------------------------');
-  console.log('📱 1. LOCAL WI-FI / LAN:');
-  console.log(`   ${localMobileUrl}\n`);
+  console.log('1. LOCAL WI-FI / LAN:');
+  console.log(`   URL:    ${localMobileUrl}`);
+  console.log(`   Ticket: ${localTicket}\n`);
   qrcode.generate(localMobileUrl, { small: true });
 
+  // 2. Tailscale Mesh VPN Ticket
   if (tailscaleIp) {
-    const tailscaleMobileUrl = `http://${tailscaleIp}:${DEFAULT_DAEMON_PORT}/?host=${tailscaleIp}&port=${DEFAULT_DAEMON_PORT}&ws=${activeWs.id}`;
+    const tailscaleTicket = encodePairingTicket({
+      version: 1,
+      host: tailscaleIp,
+      port: DEFAULT_DAEMON_PORT,
+      ssl: false,
+      token: authToken,
+      workspaceId: activeWs.id,
+    });
+    const tailscaleMobileUrl = `http://${tailscaleIp}:${DEFAULT_DAEMON_PORT}/?ticket=${tailscaleTicket}`;
     console.log('-----------------------------------------------------------');
-    console.log('🌐 2. TAILSCALE REMOTE ACCESS (Anywhere on Tailscale VPN):');
-    console.log(`   ${tailscaleMobileUrl}\n`);
+    console.log('2. TAILSCALE REMOTE ACCESS (Anywhere on Mesh VPN):');
+    console.log(`   URL:    ${tailscaleMobileUrl}`);
+    console.log(`   Ticket: ${tailscaleTicket}\n`);
+    qrcode.generate(tailscaleMobileUrl, { small: true });
   }
 
+  // 3. Cloudflare Tunnel Ticket
   let tunnelHandler: { url: string; stop: () => void } | null = null;
   if (wantTunnel) {
-    tunnelHandler = await startCloudflareTunnel(DEFAULT_DAEMON_PORT);
+    tunnelHandler = await startCloudflareTunnel(daemonPort, cloudflareToken);
     if (tunnelHandler) {
-      // In web app, we pass the tunnel host and protocol
-      const publicMobileUrl = `${tunnelHandler.url}/?ws=${activeWs.id}`;
+      const tunnelHost = tunnelHandler.url.replace(/^https?:\/\//, '');
+      const tunnelTicket = encodePairingTicket({
+        version: 1,
+        host: tunnelHost,
+        port: 443,
+        ssl: true,
+        token: authToken,
+        workspaceId: activeWs.id,
+        tunnelUrl: tunnelHandler.url,
+      });
+      const publicMobileUrl = `${tunnelHandler.url}/?ticket=${tunnelTicket}`;
       console.log('-----------------------------------------------------------');
-      console.log('🌍 3. CLOUDFLARE QUICK TUNNEL (Worldwide Cellular / HTTPS):');
-      console.log(`   ${publicMobileUrl}\n`);
+      console.log('3. CLOUDFLARE QUICK TUNNEL (Worldwide Cellular / HTTPS):');
+      console.log(`   URL:    ${publicMobileUrl}`);
+      console.log(`   Ticket: ${tunnelTicket}\n`);
       qrcode.generate(publicMobileUrl, { small: true });
     } else {
-      console.log('⚠️ Cloudflare tunnel startup timed out.');
+      console.log('Cloudflare tunnel startup timed out.');
     }
   }
 
   console.log('-----------------------------------------------------------\n');
   console.log('Waiting for Antigravity permission requests...\n');
 
+  // Terminal keyboard bypass listener for immediate desktop approvals
+  if (process.stdin.isTTY) {
+    try {
+      process.stdin.setRawMode(true);
+      process.stdin.resume();
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', key => {
+        const str = key.toString();
+        if (str === '\u0003') {
+          // Ctrl+C
+          process.emit('SIGINT');
+        } else if (str.toLowerCase() === 'a') {
+          if (hookIpc.resolveLatest('allow')) {
+            console.log('\n[DESKTOP BYPASS] Allowed immediately from desktop console.');
+          }
+        } else if (str.toLowerCase() === 'd') {
+          if (hookIpc.resolveLatest('deny')) {
+            console.log('\n[DESKTOP BYPASS] Denied immediately from desktop console.');
+          }
+        }
+      });
+    } catch {}
+  }
+
   hookIpc.on('approval_requested', req => {
-    console.log(`\n🔔 [APPROVAL NEEDED] Tool: "${req.toolCall.name}"`);
+    console.log(`\n[APPROVAL NEEDED] Tool: "${req.toolCall.name}"`);
     console.log(`   Workspace: ${req.workspacePath}`);
-    console.log(`   Args: ${JSON.stringify(req.toolCall.args)}`);
-    console.log(`   ➡️ Pushed to mobile companion. Awaiting response...`);
+    if (req.toolCall.args?.CommandLine) console.log(`   Command:   ${req.toolCall.args.CommandLine}`);
+    console.log(`   -> Pushed to mobile companion (120s timeout).`);
+    console.log(`   [DESKTOP KEYBOARD]: Press [A] to Allow now, [D] to Deny.`);
   });
 
   hookIpc.on('approval_resolved', res => {
-    console.log(`✅ [APPROVAL RESOLVED] Decision: ${res.decision.toUpperCase()}`);
+    console.log(`[APPROVAL RESOLVED] Decision: ${res.decision.toUpperCase()}`);
     if (res.reason) console.log(`   Reason: ${res.reason}`);
   });
 

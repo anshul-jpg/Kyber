@@ -1,11 +1,14 @@
 {
   "name": "@agy-companion/protocol",
   "version": "0.1.0",
+  "type": "module",
   "main": "dist/index.js",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "watch": "tsc --watch"
+    "watch": "tsc --watch",
+    "test": "tsc && node --test dist/ticket.test.js"
   },
   "dependencies": {},
   "devDependencies": {
