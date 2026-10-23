@@ -100,6 +100,7 @@ export default function App() {
   const [conversationTitle, setConversationTitle] = useState<string>('Recap And Daily Agenda');
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [activeSessionBackup, setActiveSessionBackup] = useState<{ id: string; title: string; messages: ChatMessage[] } | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
 
   // Prompt & Input Dock States
@@ -431,6 +432,7 @@ export default function App() {
             if (msg.conversationTitle) {
               setConversationTitle(msg.conversationTitle);
             }
+            setActiveSessionBackup(null);
             setIsQueued(false);
             setIsStreaming(false);
             setCurrentThinking(null);
@@ -1132,6 +1134,13 @@ export default function App() {
         activeActionModal={activeActionModal}
         onToggleExplorer={() => setActiveActionModal(activeActionModal === 'explorer' ? null : 'explorer')}
         onNewChat={() => {
+          if (chatMessages.length > 0) {
+            setActiveSessionBackup({
+              id: activeWorkspaceId || 'active',
+              title: conversationTitle,
+              messages: chatMessages,
+            });
+          }
           setChatMessages([]);
           setConversationTitle('New Conversation');
         }}
@@ -1194,10 +1203,28 @@ export default function App() {
             onSelectWorkspace={id => {
               setActiveWorkspaceId(id);
               if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-                wsRef.current.send(JSON.stringify({ type: 'client:select_workspace', workspaceId: id }));
+                wsRef.current.send(JSON.stringify({ type: 'client:switch_workspace', workspaceId: id }));
               }
             }}
             onOpenExplorer={() => setActiveActionModal('explorer')}
+            activeConversation={
+              activeSessionBackup
+                ? {
+                    id: activeSessionBackup.id,
+                    title: activeSessionBackup.title,
+                    messageCount: activeSessionBackup.messages.length,
+                  }
+                : null
+            }
+            onResumeActiveChat={() => {
+              if (activeSessionBackup) {
+                setChatMessages(activeSessionBackup.messages);
+                setConversationTitle(activeSessionBackup.title);
+                setActiveSessionBackup(null);
+              } else if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({ type: 'client:switch_workspace', workspaceId: activeWorkspaceId }));
+              }
+            }}
           />
         ) : (
           <>

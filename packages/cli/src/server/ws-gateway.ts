@@ -882,8 +882,12 @@ export class WsGateway {
         break;
 
       case 'client:switch_workspace': {
-        const targetWs = this.workspaceManager.getWorkspace(msg.workspaceId);
+        const targetWs = this.workspaceManager.getWorkspace((msg as any).workspaceId);
         if (targetWs) {
+          targetWs.lastActive = Date.now();
+          if (targetWs.path) {
+            this.ideWatcher.autoDiscoverActiveConversation(targetWs.path);
+          }
           const history = this.ideWatcher.getHistory();
           ws.send(
             JSON.stringify({
@@ -893,6 +897,10 @@ export class WsGateway {
               conversationTitle: this.ideWatcher.getConversationTitle(),
             })
           );
+          this.broadcast({
+            type: 'server:workspaces_updated',
+            workspaces: this.workspaceManager.listWorkspaces(),
+          });
         }
         break;
       }
