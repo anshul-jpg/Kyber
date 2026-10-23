@@ -16,6 +16,8 @@ import {
   Pencil,
   Play,
   Pause,
+  Trash2,
+  Check,
 } from 'lucide-react';
 import { QuickAction, CompanionMode, ExecutionPolicy } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
@@ -823,39 +825,48 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   {Math.floor(recordingSeconds / 60)}:{(recordingSeconds % 60).toString().padStart(2, '0')}
                 </span>
               </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <button
                   type="button"
                   onClick={cancelAudioRecording}
+                  title="Discard voice recording"
                   style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#a1a1aa',
-                    fontSize: '11.5px',
+                    background: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    borderRadius: '5px',
+                    color: '#f87171',
+                    fontSize: '11px',
+                    fontWeight: 500,
                     cursor: 'pointer',
-                    padding: '2px 6px',
+                    padding: '3px 8px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  Cancel
+                  <Trash2 size={11} color="#f87171" />
+                  <span>Discard</span>
                 </button>
                 <button
                   type="button"
                   onClick={stopAudioRecording}
+                  title="Finish and attach voice note"
                   style={{
-                    background: '#ef4444',
+                    background: '#007acc',
                     border: 'none',
-                    borderRadius: '6px',
+                    borderRadius: '5px',
                     color: '#ffffff',
-                    fontSize: '11.5px',
+                    fontSize: '11px',
                     fontWeight: 600,
-                    padding: '3px 8px',
+                    padding: '3px 9px',
                     cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '4px',
                   }}
                 >
-                  <Square size={9} fill="#ffffff" />
+                  <Check size={11} color="#ffffff" />
                   <span>Done</span>
                 </button>
               </div>
@@ -1041,12 +1052,34 @@ export const PromptDock = React.memo<PromptDockProps>(({
 
             {/* Right Sub-Controls */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              {isRecordingAudio && (
+                <button
+                  type="button"
+                  onClick={cancelAudioRecording}
+                  title="Discard Voice Note"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.15)',
+                    border: '1px solid rgba(239, 68, 68, 0.3)',
+                    color: '#f87171',
+                    width: '28px',
+                    height: '28px',
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Trash2 size={13} color="#f87171" />
+                </button>
+              )}
               <button
                 type="button"
                 onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
-                title={isRecordingAudio ? 'Stop Recording Voice Note' : 'Record Voice Note'}
+                title={isRecordingAudio ? 'Finish & Attach Voice Note' : 'Record Voice Note'}
                 style={{
-                  background: isRecordingAudio ? '#ef4444' : 'transparent',
+                  background: isRecordingAudio ? '#007acc' : 'transparent',
                   border: 'none',
                   color: isRecordingAudio ? '#ffffff' : '#858585',
                   width: '28px',
@@ -1059,7 +1092,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   transition: 'background 0.15s ease',
                 }}
               >
-                {isRecordingAudio ? <Square size={12} fill="#ffffff" /> : <Mic size={15} />}
+                {isRecordingAudio ? <Check size={14} color="#ffffff" /> : <Mic size={15} />}
               </button>
 
               {/* Dynamic Action Button: Send/Queue when user typed, Stop when busy, disabled send when idle */}

@@ -400,6 +400,129 @@ export class WsGateway {
           return;
         }
 
+        // Live Workspace File Content Reader for Mobile Explorer Preview
+        if (url.startsWith('/api/workspace/file/content') || url.startsWith('/api/file/content')) {
+          try {
+            const parsed = new URL(url, 'http://localhost');
+            const wsId = parsed.searchParams.get('workspaceId') || this.workspaceManager.listWorkspaces()[0]?.id;
+            const targetWs = wsId ? this.workspaceManager.getWorkspace(wsId) : null;
+            if (!targetWs) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Workspace not found' }));
+              return;
+            }
+            const rootPath = path.resolve(targetWs.path);
+            const relFile = (parsed.searchParams.get('filePath') || parsed.searchParams.get('path') || '').replace(/^(\/|\\)+/, '');
+            const targetPath = path.resolve(rootPath, relFile);
+            if (!targetPath.startsWith(rootPath) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'File not found or invalid' }));
+              return;
+            }
+            const stat = fs.statSync(targetPath);
+            const ext = path.extname(targetPath).toLowerCase();
+            const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext);
+
+            let mimeType = 'text/plain';
+            if (ext === '.md') mimeType = 'text/markdown';
+            else if (ext === '.html') mimeType = 'text/html';
+            else if (ext === '.json') mimeType = 'application/json';
+            else if (ext === '.png') mimeType = 'image/png';
+            else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+            else if (ext === '.webp') mimeType = 'image/webp';
+            else if (ext === '.svg') mimeType = 'image/svg+xml';
+
+            if (isImage) {
+              const data = fs.readFileSync(targetPath);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                ok: true,
+                path: relFile,
+                name: path.basename(targetPath),
+                size: stat.size,
+                isText: false,
+                base64: data.toString('base64'),
+                mimeType,
+              }));
+              return;
+            }
+
+            if (stat.size > 500 * 1024) {
+              const buf = Buffer.alloc(50 * 1024);
+              const fd = fs.openSync(targetPath, 'r');
+              fs.readSync(fd, buf, 0, 50 * 1024, 0);
+              fs.closeSync(fd);
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                ok: true,
+                path: relFile,
+                name: path.basename(targetPath),
+                size: stat.size,
+                isText: true,
+                truncated: true,
+                content: buf.toString('utf8') + '\n\n... (truncated: file exceeds 500KB)',
+                mimeType,
+              }));
+              return;
+            }
+
+            const content = fs.readFileSync(targetPath, 'utf8');
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+              ok: true,
+              path: relFile,
+              name: path.basename(targetPath),
+              size: stat.size,
+              isText: true,
+              truncated: false,
+              content,
+              mimeType,
+            }));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        // Live Session Artifacts List for Mobile Artifacts Viewer
+        if (url.startsWith('/api/session/artifacts') && req.method === 'GET') {
+          try {
+            const artifacts = this.ideWatcher.getSessionArtifacts();
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, artifacts, count: artifacts.length }));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        // Live Session Artifact Content Reader
+        if (url.startsWith('/api/session/artifact/content') || url.startsWith('/api/session/artifact')) {
+          try {
+            const parsed = new URL(url, 'http://localhost');
+            const relPath = (parsed.searchParams.get('path') || parsed.searchParams.get('name') || '').replace(/^(\/|\\)+/, '');
+            if (!relPath) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Missing artifact path' }));
+              return;
+            }
+            const data = this.ideWatcher.getArtifactContent(relPath);
+            if (!data) {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Artifact not found' }));
+              return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...data }));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
         // Direct HTTP fallback for mobile approvals (notifications / background tasks)
         if ((url === '/api/hook/approval' || url === '/api/approval') && req.method === 'POST') {
           let body = '';

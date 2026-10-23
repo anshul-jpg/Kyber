@@ -649,4 +649,115 @@ export class IdeTranscriptWatcher extends EventEmitter {
       },
     ];
   }
+
+  public getConversationDir(): string | null {
+    if (!this.activeTranscriptPath) {
+      this.autoDiscoverActiveConversation();
+    }
+    if (!this.activeTranscriptPath) return null;
+    return path.resolve(path.dirname(this.activeTranscriptPath), '..', '..');
+  }
+
+  public getSessionArtifacts(): Array<{ name: string; relPath: string; size: number; mtime: number; type: 'markdown' | 'image' | 'code' | 'other' }> {
+    const convDir = this.getConversationDir();
+    if (!convDir || !fs.existsSync(convDir)) return [];
+
+    const artifacts: Array<{ name: string; relPath: string; size: number; mtime: number; type: 'markdown' | 'image' | 'code' | 'other' }> = [];
+    const ignoredNames = new Set(['.system_generated', '.tempmediaStorage', '.user_uploaded', 'browser']);
+
+    const scanDir = (dir: string, prefix: string = '') => {
+      try {
+        const dirents = fs.readdirSync(dir, { withFileTypes: true });
+        for (const d of dirents) {
+          if (ignoredNames.has(d.name) || d.name.endsWith('.metadata.json')) continue;
+          const fullPath = path.join(dir, d.name);
+          const relPath = prefix ? `${prefix}/${d.name}` : d.name;
+
+          if (d.isDirectory()) {
+            if (prefix === '' && d.name === 'scratch') {
+              scanDir(fullPath, d.name);
+            }
+          } else {
+            try {
+              const stat = fs.statSync(fullPath);
+              const ext = path.extname(d.name).toLowerCase();
+              let type: 'markdown' | 'image' | 'code' | 'other' = 'other';
+              if (ext === '.md' || ext === '.markdown') type = 'markdown';
+              else if (['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext)) type = 'image';
+              else if (['.ts', '.tsx', '.js', '.jsx', '.json', '.html', '.css', '.py', '.sh'].includes(ext)) type = 'code';
+
+              artifacts.push({
+                name: d.name,
+                relPath,
+                size: stat.size,
+                mtime: stat.mtimeMs,
+                type,
+              });
+            } catch {}
+          }
+        }
+      } catch {}
+    };
+
+    scanDir(convDir);
+    return artifacts.sort((a, b) => b.mtime - a.mtime);
+  }
+
+  public getArtifactContent(relPath: string): { name: string; size: number; isText: boolean; content?: string; base64?: string; mimeType: string } | null {
+    const convDir = this.getConversationDir();
+    if (!convDir || !fs.existsSync(convDir)) return null;
+
+    const safeRel = relPath.replace(/^(\/|\\)+/, '');
+    const targetPath = path.resolve(convDir, safeRel);
+    if (!targetPath.startsWith(convDir) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
+      return null;
+    }
+
+    const stat = fs.statSync(targetPath);
+    const ext = path.extname(targetPath).toLowerCase();
+    const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext);
+
+    let mimeType = 'text/plain';
+    if (ext === '.md') mimeType = 'text/markdown';
+    else if (ext === '.html') mimeType = 'text/html';
+    else if (ext === '.json') mimeType = 'application/json';
+    else if (ext === '.png') mimeType = 'image/png';
+    else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg';
+    else if (ext === '.webp') mimeType = 'image/webp';
+    else if (ext === '.svg') mimeType = 'image/svg+xml';
+
+    if (isImage) {
+      const data = fs.readFileSync(targetPath);
+      return {
+        name: path.basename(targetPath),
+        size: stat.size,
+        isText: false,
+        base64: data.toString('base64'),
+        mimeType,
+      };
+    }
+
+    if (stat.size > 500 * 1024) {
+      const buf = Buffer.alloc(50 * 1024);
+      const fd = fs.openSync(targetPath, 'r');
+      fs.readSync(fd, buf, 0, 50 * 1024, 0);
+      fs.closeSync(fd);
+      return {
+        name: path.basename(targetPath),
+        size: stat.size,
+        isText: true,
+        content: buf.toString('utf8') + '\n\n... (truncated: file exceeds 500KB)',
+        mimeType,
+      };
+    }
+
+    const content = fs.readFileSync(targetPath, 'utf8');
+    return {
+      name: path.basename(targetPath),
+      size: stat.size,
+      isText: true,
+      content,
+      mimeType,
+    };
+  }
 }

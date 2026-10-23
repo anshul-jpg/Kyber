@@ -8,10 +8,10 @@ import {
   Folder,
   ChevronDown,
   ChevronRight,
-  File,
   RefreshCw,
+  ArrowLeft,
 } from 'lucide-react';
-import { FileTypeBadge } from './CommonUI';
+import { FileTypeBadge, CopyButton, MarkdownContent, triggerHaptic } from './CommonUI';
 
 interface ModifiedFile {
   file: string;
@@ -25,6 +25,27 @@ export interface FileEntry {
   isDirectory: boolean;
   path: string;
   size?: number;
+}
+
+export interface SessionArtifactItem {
+  name: string;
+  relPath: string;
+  size: number;
+  mtime: number;
+  type: 'markdown' | 'image' | 'code' | 'other';
+}
+
+export interface ActivePreviewItem {
+  title: string;
+  path: string;
+  isArtifact: boolean;
+  content?: string;
+  base64?: string;
+  mimeType?: string;
+  isText?: boolean;
+  size?: number;
+  loading: boolean;
+  error?: string;
 }
 
 interface ActionModalsProps {
@@ -54,16 +75,22 @@ export const ActionModals = React.memo<ActionModalsProps>(({
 }) => {
   const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, FileEntry[]>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
+  const [artifacts, setArtifacts] = useState<SessionArtifactItem[]>([]);
+  const [loadingArtifacts, setLoadingArtifacts] = useState<boolean>(false);
+  const [previewItem, setPreviewItem] = useState<ActivePreviewItem | null>(null);
+
+  const getHttpBase = useCallback(() => {
+    const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
+    const hostNoPort = cleanH.replace(/:\d+$/, '');
+    return cleanH.includes('.trycloudflare.com')
+      ? `https://${hostNoPort}`
+      : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+  }, [host, port]);
 
   const fetchFiles = useCallback(async (subPath: string = '') => {
     setLoadingPaths(prev => ({ ...prev, [subPath]: true }));
     try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
-
+      const httpBase = getHttpBase();
       const res = await fetch(
         `${httpBase}/api/workspace/files?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&subPath=${encodeURIComponent(subPath)}`
       );
@@ -77,19 +104,108 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     } finally {
       setLoadingPaths(prev => ({ ...prev, [subPath]: false }));
     }
-  }, [host, port, activeWorkspaceId]);
+  }, [getHttpBase, activeWorkspaceId]);
+
+  const fetchArtifacts = useCallback(async () => {
+    setLoadingArtifacts(true);
+    try {
+      const httpBase = getHttpBase();
+      const res = await fetch(`${httpBase}/api/session/artifacts`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.artifacts)) {
+          setArtifacts(data.artifacts);
+        }
+      }
+    } catch {
+    } finally {
+      setLoadingArtifacts(false);
+    }
+  }, [getHttpBase]);
 
   useEffect(() => {
+    setPreviewItem(null);
     if (activeActionModal === 'explorer') {
       fetchFiles('');
+    } else if (activeActionModal === 'artifacts') {
+      fetchArtifacts();
     }
-  }, [activeActionModal, activeWorkspaceId, fetchFiles]);
+  }, [activeActionModal, activeWorkspaceId, fetchFiles, fetchArtifacts]);
 
   const handleToggleFolder = (folderPath: string) => {
     const isExpanding = !expandedFolders[folderPath];
     onToggleFolder(folderPath);
     if (isExpanding && !workspaceFiles[folderPath]) {
       fetchFiles(folderPath);
+    }
+  };
+
+  const handleOpenFile = async (filePath: string, fileName: string) => {
+    triggerHaptic(15);
+    setPreviewItem({
+      title: fileName,
+      path: filePath,
+      isArtifact: false,
+      loading: true,
+    });
+    try {
+      const httpBase = getHttpBase();
+      const res = await fetch(
+        `${httpBase}/api/workspace/file/content?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&filePath=${encodeURIComponent(filePath)}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewItem({
+          title: data.name || fileName,
+          path: filePath,
+          isArtifact: false,
+          content: data.content,
+          base64: data.base64,
+          mimeType: data.mimeType,
+          isText: data.isText,
+          size: data.size,
+          loading: false,
+        });
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Failed to read file' }));
+        setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.error || 'Failed to load file' } : null));
+      }
+    } catch (err: any) {
+      setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.message || 'Connection error' } : null));
+    }
+  };
+
+  const handleOpenArtifact = async (art: SessionArtifactItem) => {
+    triggerHaptic(15);
+    setPreviewItem({
+      title: art.name,
+      path: art.relPath,
+      isArtifact: true,
+      size: art.size,
+      loading: true,
+    });
+    try {
+      const httpBase = getHttpBase();
+      const res = await fetch(`${httpBase}/api/session/artifact/content?path=${encodeURIComponent(art.relPath)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewItem({
+          title: data.name || art.name,
+          path: art.relPath,
+          isArtifact: true,
+          content: data.content,
+          base64: data.base64,
+          mimeType: data.mimeType,
+          isText: data.isText,
+          size: data.size || art.size,
+          loading: false,
+        });
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Failed to read artifact' }));
+        setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.error || 'Failed to load artifact' } : null));
+      }
+    } catch (err: any) {
+      setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.message || 'Connection error' } : null));
     }
   };
 
@@ -124,7 +240,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                     display: 'flex',
                     alignItems: 'center',
                     gap: '6px',
-                    padding: '3px 6px',
+                    padding: '4px 6px',
                     cursor: 'pointer',
                     color: '#cccccc',
                     borderRadius: '4px',
@@ -154,20 +270,155 @@ export const ActionModals = React.memo<ActionModalsProps>(({
           return (
             <div
               key={item.path}
+              onClick={() => handleOpenFile(item.path, item.name)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
                 gap: '6px',
-                padding: '2px 6px 2px 20px',
+                padding: '4px 6px 4px 20px',
                 color: '#cccccc',
                 fontSize: '12.5px',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: 'background 0.1s ease',
               }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
               <FileTypeBadge name={item.name} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
             </div>
           );
         })}
+      </div>
+    );
+  };
+
+  const renderPreviewView = () => {
+    if (!previewItem) return null;
+
+    const sizeStr = previewItem.size !== undefined
+      ? previewItem.size > 1024
+        ? `${(previewItem.size / 1024).toFixed(1)} KB`
+        : `${previewItem.size} B`
+      : '';
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {/* Preview Sub-Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            background: 'rgba(255, 255, 255, 0.04)',
+            borderRadius: '6px',
+            padding: '6px 8px',
+          }}
+        >
+          <button
+            onClick={() => {
+              triggerHaptic(10);
+              setPreviewItem(null);
+            }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              borderRadius: '5px',
+              color: '#cccccc',
+              padding: '3px 8px',
+              fontSize: '11px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              cursor: 'pointer',
+            }}
+          >
+            <ArrowLeft size={12} />
+            <span>Back</span>
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflow: 'hidden', margin: '0 8px' }}>
+            <FileTypeBadge name={previewItem.title} />
+            <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {previewItem.title}
+            </span>
+            {sizeStr && <span style={{ fontSize: '10px', color: '#858585', flexShrink: 0 }}>({sizeStr})</span>}
+          </div>
+
+          <div>
+            {previewItem.isText && previewItem.content && (
+              <CopyButton text={previewItem.content} />
+            )}
+          </div>
+        </div>
+
+        {/* Preview Body */}
+        {previewItem.loading ? (
+          <div style={{ padding: '36px', textAlign: 'center', color: '#858585', fontSize: '12.5px', fontStyle: 'italic' }}>
+            Loading file contents...
+          </div>
+        ) : previewItem.error ? (
+          <div
+            style={{
+              padding: '16px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: '6px',
+              color: '#fca5a5',
+              fontSize: '12px',
+            }}
+          >
+            {previewItem.error}
+          </div>
+        ) : !previewItem.isText && previewItem.base64 ? (
+          <div style={{ display: 'flex', justifyContent: 'center', padding: '16px', background: '#121213', borderRadius: '6px' }}>
+            <img
+              src={`data:${previewItem.mimeType || 'image/png'};base64,${previewItem.base64}`}
+              alt={previewItem.title}
+              style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '4px', objectFit: 'contain' }}
+            />
+          </div>
+        ) : previewItem.title.toLowerCase().endsWith('.md') ? (
+          <div
+            style={{
+              background: '#161617',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '6px',
+              padding: '14px',
+              color: '#e4e4e7',
+              fontSize: '12.5px',
+              lineHeight: '1.55',
+            }}
+          >
+            <MarkdownContent content={previewItem.content || ''} />
+          </div>
+        ) : (
+          <div
+            style={{
+              background: '#121213',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '6px',
+              overflowX: 'auto',
+              padding: '10px',
+              fontSize: '11px',
+              fontFamily: 'monospace',
+              lineHeight: '1.6',
+              color: '#e4e4e7',
+              whiteSpace: 'pre',
+              maxHeight: '480px',
+            }}
+          >
+            {(previewItem.content || '').split('\n').map((line, idx) => (
+              <div key={idx} style={{ display: 'flex', gap: '12px' }}>
+                <span style={{ color: '#52525b', minWidth: '28px', textAlign: 'right', userSelect: 'none', flexShrink: 0 }}>
+                  {idx + 1}
+                </span>
+                <span>{line || ' '}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
@@ -192,11 +443,12 @@ export const ActionModals = React.memo<ActionModalsProps>(({
         style={{
           width: '100%',
           maxWidth: '680px',
-          height: '75vh',
+          maxHeight: '85vh',
           background: '#181818',
           borderTopLeftRadius: '16px',
           borderTopRightRadius: '16px',
-          border: '1px solid rgba(255, 255, 255, 0.1)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderBottom: 'none',
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 -8px 32px rgba(0,0,0,0.5)',
@@ -224,12 +476,12 @@ export const ActionModals = React.memo<ActionModalsProps>(({
               {activeActionModal === 'terminal' && 'Terminal Execution'}
               {activeActionModal === 'artifacts' && 'Generated Artifacts'}
               {activeActionModal === 'browser' && 'Browser Preview'}
-              {activeActionModal === 'explorer' && 'Explorer'}
+              {activeActionModal === 'explorer' && 'Workspace Explorer'}
             </span>
           </div>
           <button
             onClick={onClose}
-            style={{ background: 'transparent', border: 'none', color: '#858585', cursor: 'pointer' }}
+            style={{ background: 'transparent', border: 'none', color: '#858585', cursor: 'pointer', padding: '4px' }}
           >
             <X size={16} />
           </button>
@@ -239,42 +491,44 @@ export const ActionModals = React.memo<ActionModalsProps>(({
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px' }}>
           {/* Live Dynamic File Explorer Tree */}
           {activeActionModal === 'explorer' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'monospace', fontSize: '12.5px' }}>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '6px 8px',
-                  background: 'rgba(255, 255, 255, 0.04)',
-                  borderRadius: '6px',
-                  marginBottom: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ffffff', fontWeight: 600 }}>
-                  <Folder size={15} color="#007acc" />
-                  <span style={{ fontSize: '13px' }}>{activeWorkspaceName || 'Workspace Files'}</span>
-                </div>
-                <button
-                  onClick={() => fetchFiles('')}
-                  title="Refresh Files"
+            previewItem ? renderPreviewView() : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontFamily: 'monospace', fontSize: '12.5px' }}>
+                <div
                   style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#858585',
-                    cursor: 'pointer',
                     display: 'flex',
                     alignItems: 'center',
-                    padding: '4px',
-                    borderRadius: '4px',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    borderRadius: '6px',
+                    marginBottom: '8px',
                   }}
                 >
-                  <RefreshCw size={13} className={loadingPaths[''] ? 'animate-spin' : ''} />
-                </button>
-              </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ffffff', fontWeight: 600 }}>
+                    <Folder size={15} color="#007acc" />
+                    <span style={{ fontSize: '13px' }}>{activeWorkspaceName || 'Workspace Files'}</span>
+                  </div>
+                  <button
+                    onClick={() => fetchFiles('')}
+                    title="Refresh Files"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#858585',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '4px',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    <RefreshCw size={13} className={loadingPaths[''] ? 'animate-spin' : ''} />
+                  </button>
+                </div>
 
-              {renderDirectoryNode('', 0)}
-            </div>
+                {renderDirectoryNode('', 0)}
+              </div>
+            )
           )}
 
           {/* Diff Modal */}
@@ -288,6 +542,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                 modifiedFilesList.map((f, i) => (
                   <div
                     key={i}
+                    onClick={() => handleOpenFile(f.file, f.file)}
                     style={{
                       background: '#1e1e1e',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -297,6 +552,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       fontSize: '12.5px',
+                      cursor: 'pointer',
                     }}
                   >
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -339,28 +595,88 @@ export const ActionModals = React.memo<ActionModalsProps>(({
             </div>
           )}
 
-          {/* Artifacts Modal */}
+          {/* Real Live Artifacts Modal */}
           {activeActionModal === 'artifacts' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ color: '#858585', fontSize: '12px' }}>Session Artifacts:</div>
-              <div
-                style={{
-                  background: '#1e1e1e',
-                  border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '8px',
-                  padding: '14px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <FileText size={24} color="#007acc" />
-                <div>
-                  <div style={{ color: '#ffffff', fontSize: '13px', fontWeight: 600 }}>DESIGN.md</div>
-                  <div style={{ color: '#858585', fontSize: '11px' }}>Master design system specification</div>
+            previewItem ? renderPreviewView() : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    borderRadius: '6px',
+                    marginBottom: '6px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ffffff', fontWeight: 600 }}>
+                    <ImageIcon size={15} color="#007acc" />
+                    <span style={{ fontSize: '13px' }}>Session Artifacts ({artifacts.length})</span>
+                  </div>
+                  <button
+                    onClick={fetchArtifacts}
+                    title="Refresh Artifacts"
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: '#858585',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      padding: '4px',
+                      borderRadius: '4px',
+                    }}
+                  >
+                    <RefreshCw size={13} className={loadingArtifacts ? 'animate-spin' : ''} />
+                  </button>
                 </div>
+
+                {loadingArtifacts && artifacts.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#858585', fontSize: '12.5px', fontStyle: 'italic' }}>
+                    Loading session artifacts...
+                  </div>
+                ) : artifacts.length === 0 ? (
+                  <div style={{ padding: '30px 16px', textAlign: 'center', color: '#858585', fontSize: '12.5px' }}>
+                    No artifacts generated in this session yet.
+                  </div>
+                ) : (
+                  artifacts.map((art, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => handleOpenArtifact(art)}
+                      style={{
+                        background: '#1e1e1e',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '6px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '12.5px',
+                        cursor: 'pointer',
+                        transition: 'background 0.15s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#252525')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#1e1e1e')}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                        <FileTypeBadge name={art.name} />
+                        <div style={{ overflow: 'hidden' }}>
+                          <div style={{ color: '#ffffff', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {art.name}
+                          </div>
+                          <div style={{ color: '#858585', fontSize: '11px' }}>
+                            {art.size > 1024 ? `${(art.size / 1024).toFixed(1)} KB` : `${art.size} B`} • {new Date(art.mtime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight size={14} color="#858585" />
+                    </div>
+                  ))
+                )}
               </div>
-            </div>
+            )
           )}
 
           {/* Browser Modal */}

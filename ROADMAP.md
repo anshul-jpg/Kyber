@@ -63,6 +63,7 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
   - Continuous `MediaRecorder` audio capture with live recording pulse bar and duration counter.
   - Tapping the Mic button records audio without any silence time-limit (supports multi-minute walk rambles).
   - Tapping Stop attaches a previewable audio chip `[🎙️ Voice Note (0:14) ▶️ ✕]` in the prompt dock.
+  - **1-Tap Discard / Cancel:** Quick-discard `<Trash2>` controls in both the recording waveform bar and bottom dock to immediately cancel notes without cleanup.
   - Dispatches raw audio to the daemon over WebSocket/HTTP. The daemon saves it to `.user_uploaded` and attaches it directly to the Antigravity agent turn via `[Attached Media]: file:///...`, letting Gemini natively hear the audio waveform and execute tasks directly.
   - Custom dark audio player bubble rendered in mobile chat feed for playback and scrub seeking.
 - [x] **Microphone Voice Dictation in Android App:** Implemented native `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` via `AndroidHost.startVoiceInput()` in `MainActivity.java` with automatic transcription event feed into `PromptDock`.
@@ -73,7 +74,8 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
 ### Phase 2.2: Deep IDE Inspection & Concurrent Workspace Management
 - [x] **Concurrent Multi-Window Workspace Switcher:**
   - **Discrete Workspace Containers:** Each open IDE window is treated as an isolated container on the phone companion (`Container A: antigravity compainion`, `Container B: FIRE TV`).
-  - **Dynamic File System Explorer (Killed Hardcoded Tree Mock):** Replaced static mock in `ActionModals.tsx` with live `/api/workspace/files` crawling over HTTP & WebSocket. Dynamic expansion, child scanning, and zero mocks.
+  - **Dynamic File System Explorer & Tap-to-Preview:** Replaced static mock in `ActionModals.tsx` with live `/api/workspace/files` crawler. Tapping any file fetches `/api/workspace/file/content` and opens an in-modal preview sheet with line numbers, copy button, and markdown/image rendering.
+  - **Live Session Artifacts Viewer:** Replaced static mock in `ActionModals.tsx` with live `/api/session/artifacts` crawler that lists real conversation artifacts (`.md`, `.png`, `.jpg`, `.ts`) with sizes, timestamps, and full preview capability.
   - **Header Workspace Switcher Pill (`[📁 <WorkspaceName> ▾]`):** 1-tap dropdown in the phone header displaying active container name, live status dots (`Idle` / `Busy` / `Waiting Approval`), pending approval counters, and immediate project switching.
   - **Multi-Window Approval Isolation:** Approval cards display prominent workspace badges (`[FIRE TV]` vs `[antigravity compainion]`) so you know exactly which project requires tool approval.
 - [ ] **Recent Projects Hub & Auto-Companion Initialization:**
@@ -107,8 +109,9 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
   - **Android Native App:** Updated `ic_launcher_background.xml` (`#121213`), updated `ic_launcher_foreground.xml` with A.3 vector silhouette, updated `strings.xml` (`app_name` = `KYBER`, `title_activity_main` = `KYBER`), updated `capacitor.config.ts`.
   - **VS Code Extension:** Updated `media/icon.svg`, updated `package.json` (`displayName: "KYBER"` and activity bar title), built and deployed to live extension directory.
   - **CLI Daemon:** Updated `agy-companion.ts` ASCII banner to `KYBER`.
+- [ ] **VS Code Sidebar Template Header Unification (On Hold):** Update `sidebar-template.ts` header to display KYBER with A.3 SVG mark.
 - [ ] **Notification Beautification:** Modernize the persistent notification using styled category headers, monospace command badges, and Linear-style status indicators.
-- [ ] **Tactile Audio Feedback:** Replace generic Web Audio beeps with subtle, tactile audio cues synthesized for status changes, approval prompts, and turn completions.
+- [ ] **Tactile Audio Feedback (On Hold):** Replace generic Web Audio beeps with subtle, tactile audio cues synthesized for status changes, approval prompts, and turn completions.
 
 ---
 
