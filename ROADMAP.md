@@ -78,10 +78,22 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
   - **Live Session Artifacts Viewer:** Replaced static mock in `ActionModals.tsx` with live `/api/session/artifacts` crawler that lists real conversation artifacts (`.md`, `.png`, `.jpg`, `.ts`) with sizes, timestamps, and full preview capability.
   - **Header Workspace Switcher Pill (`[📁 <WorkspaceName> ▾]`):** 1-tap dropdown in the phone header displaying active container name, live status dots (`Idle` / `Busy` / `Waiting Approval`), pending approval counters, and immediate project switching.
   - **Multi-Window Approval Isolation:** Approval cards display prominent workspace badges (`[FIRE TV]` vs `[antigravity compainion]`) so you know exactly which project requires tool approval.
-- [ ] **Recent Projects Hub & Auto-Companion Initialization:**
-  - Tapping the active header tab / workspace dropdown displays the full list of recent Antigravity projects (1:1 with Antigravity IDE's native Home/Welcome screen).
-  - Selecting any previous project switches the active session in the companion.
-  - **Zero-Touch Auto-Hook:** If the selected project does not yet have the companion hook installed, the daemon automatically runs `hook install <projectPath>` on the host, provisioning `.agents/hooks.json` and `.agents/interceptor.js` on the fly so tool approvals immediately route to your phone.
+- [x] **Home Screen Navigation Trap Elimination & Real Workspace Switching:**
+  - Added **`[ 🟢 Active Session: <Title> • Resume Chat → ]`** card to `HomeScreen.tsx` so users can always return to their active conversation in 1 tap.
+  - In `ws-gateway.ts`, wired `client:switch_workspace` and `client:select_workspace` to auto-discover conversation transcripts and broadcast `server:history` and `server:workspaces_updated`.
+  - Added live status dots (🟢/🟡) to workspace cards on the home screen.
+  - Preserved `activeSessionBackup` in `App.tsx` so clicking `+` never discards an ongoing chat from memory.
+- [x] **Audio Scratchpad Transcript Leak Suppression:**
+  - Suppressed intermediate `entry.content` accompanying tool calls in `ide-watcher.ts`.
+  - Added sanitization filters in `App.tsx` so voice note transcripts never dump into chat bubbles.
+- [x] **KYBER 3-Level Master Architecture & Visual Flowchart:**
+  - Codified master architecture in `kyber_ui_flowchart_and_architecture.md`.
+  - Generated mobile visual diagram (`kyber_flowchart_diagram_1792725516745.jpg`) and documented in `kyber_visual_flowchart.md`.
+- [ ] **Phase B: Active Editor Tabs Bar & Recent Projects Integration (Next Priority):**
+  - **Open Editor Tabs Telemetry:** VS Code Extension pushes open editor tabs (`vscode.window.tabGroups.all`) to daemon over WebSocket.
+  - **Touch-Scrollable Tabs Bar:** Render `[ 📄 App.tsx ] [ 📄 ActionModals.tsx ]` horizontal strip beneath the header. Tapping any tab opens its syntax preview sheet.
+  - **Segmented 3-Pillar Switcher:** Top bar switching seamlessly between `[ 💬 Chat ] [ 📑 Open Tabs ] [ 📁 Explorer ]`.
+  - **Recent Projects Hub:** Crawl host recent Antigravity projects (1:1 with IDE welcome screen) with 1-tap launch on PC and auto-provisioning of `.agents/hooks.json`.
 - [ ] **Fail-Safe Pause & Tap-to-Resume Approval Gating:**
   - In Remote Mode, when the 120s fail-safe timeout triggers on an unapproved mutating tool call, replace the fallback to desktop auto-run (`decision: 'ask'`) with an authoritative execution freeze (`decision: 'deny'`) with reason: `Execution Paused: Waiting for mobile approval. Chat suspended.`
   - Guarantees zero unattended file mutations or shell executions while the user is away from both PC and phone.

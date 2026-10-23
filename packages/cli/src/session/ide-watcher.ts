@@ -199,28 +199,22 @@ export class IdeTranscriptWatcher extends EventEmitter {
         }
       }
 
-      if (entry.content) {
-        const thoughtToAttach = thinking || this.lastThought || undefined;
-        const msg: ChatMessage = {
-          id: `ide_a_${entry.step_index || Date.now()}`,
-          role: 'assistant',
-          content: entry.content,
-          timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
-          thought: thoughtToAttach,
-        };
-        this.recordMessage(msg, emitLive);
-        this.lastThought = null;
-      } else if (entry.tool_calls && entry.tool_calls.length > 0) {
+      const hasTools = Boolean(entry.tool_calls && entry.tool_calls.length > 0);
+
+      // In Antigravity IDE, when entry.tool_calls is present, entry.content is internal tool pre-reasoning/scratchpad
+      // (or raw transcript analysis), NOT a user-facing assistant response.
+      // Emitting it as an assistant message leaks raw scratchpads & transcripts into the chat feed.
+      if (hasTools) {
+        const thoughtToAttach = entry.content || thinking || this.lastThought || undefined;
         for (let i = 0; i < entry.tool_calls.length; i++) {
           const tc = entry.tool_calls[i];
           const summary = this.getToolSummary(tc.name, tc.args);
-          const thoughtToAttach = i === 0 ? (thinking || this.lastThought || undefined) : undefined;
           const msg: ChatMessage = {
             id: `ide_t_${entry.step_index || Date.now()}_${tc.name}_${i}`,
             role: 'tool',
             content: summary,
             timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
-            thought: thoughtToAttach,
+            thought: i === 0 ? thoughtToAttach : undefined,
             toolCall: {
               name: tc.name,
               args: tc.args || {},
@@ -228,6 +222,22 @@ export class IdeTranscriptWatcher extends EventEmitter {
           };
           this.recordMessage(msg, emitLive);
         }
+        this.lastThought = null;
+      } else if (entry.content) {
+        // Strip any residual raw voice note transcription leaks
+        const cleanContent = entry.content.replace(/^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out[\s\S]*?THIS IS INCREDIBLY CLEAR[^\n]*\n+/i, '').trim();
+        if (cleanContent) {
+          const thoughtToAttach = thinking || this.lastThought || undefined;
+          const msg: ChatMessage = {
+            id: `ide_a_${entry.step_index || Date.now()}`,
+            role: 'assistant',
+            content: cleanContent,
+            timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
+            thought: thoughtToAttach,
+          };
+          this.recordMessage(msg, emitLive);
+        }
+        this.lastThought = null;
       } else if (thinking) {
         const msg: ChatMessage = {
           id: `ide_th_${entry.step_index || Date.now()}`,

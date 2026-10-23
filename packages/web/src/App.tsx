@@ -427,8 +427,15 @@ export default function App() {
             setQuickActions(msg.actions || []);
             break;
 
-          case 'server:history':
-            setChatMessages(msg.messages || []);
+          case 'server:history': {
+            const raw = (msg.messages || []) as ChatMessage[];
+            const cleaned = raw.filter(m => {
+              if (m.role === 'assistant' && m.content && /^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out/i.test(m.content)) {
+                return false;
+              }
+              return true;
+            });
+            setChatMessages(cleaned);
             if (msg.conversationTitle) {
               setConversationTitle(msg.conversationTitle);
             }
@@ -437,6 +444,7 @@ export default function App() {
             setIsStreaming(false);
             setCurrentThinking(null);
             break;
+          }
 
           case 'server:conversations_list':
             setConversations(msg.conversations || []);
@@ -447,6 +455,9 @@ export default function App() {
             break;
 
           case 'server:chat_message':
+            if (msg.message.role === 'assistant' && msg.message.content && /^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out/i.test(msg.message.content)) {
+              break;
+            }
             setChatMessages(prev => {
               // 1. If incoming message is a user message, deduplicate against any existing client_u_ or msg_u_ or ide_u_
               const cleanNorm = (t: string) => (t || '').replace(/\s*\[Attached Media\]:[\s\S]*$/i, '').trim();

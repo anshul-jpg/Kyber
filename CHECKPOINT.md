@@ -1,11 +1,11 @@
 # 🏁 KYBER: Master Checkpoint & Session State
 
-> **Checkpoint Updated:** 2026-10-23 (KYBER Rebrand Complete: Kinetic Shift A.3 Geometric Mark, Gemini Multimodal Voice Notes, Live Workspace Crawler)  
+> **Checkpoint Updated:** 2026-10-23 (KYBER Rebrand Complete, Navigation Trap Solved, Transcript Leak Patched, 3-Level Master Architecture & Flowchart Locked)  
 > **Status:** Beta 1 Operational & Beta 2 Progression in Progress. See [ROADMAP.md](file:///d:/CODE/antigravity%20compainion/ROADMAP.md) for full vision and backlog.
 
 ---
 
-## 1. Executive Summary: Architecture & Today's State
+## 1. Executive Summary: Today's Accomplishments & Current State
 
 1. **Rebranding to KYBER (Locked & Deployed):**
    - Transformed identity to **KYBER** (Greek *κυβερνήτης* — helmsman, pilot, navigator).
@@ -13,21 +13,33 @@
    - Synced across Web (`KyberLogo`, `HomeScreen.tsx`, `index.html`), Android native launcher (`ic_launcher_background.xml`, `ic_launcher_foreground.xml`, `strings.xml`), VS Code extension (`media/icon.svg`, `package.json`), and CLI banner (`agy-companion.ts`).
    - Documented ground truth in [BRAND.md](file:///d:/CODE/antigravity%20compainion/BRAND.md).
 
-2. **Phase 2.1 Native Audio Voice Notes (Gemini Multimodal Audio):**
-   - Native audio recording in `PromptDock.tsx` with live audio waveform pulses and duration counter.
-   - Attach previewable audio chips `[🎙️ Voice Note (0:14) ▶️ ✕]`.
-   - Streaming raw audio to daemon $\rightarrow$ `.user_uploaded` $\rightarrow$ Gemini agent turn via `[Attached Media]: file:///...`.
-   - Native dark audio player bubble in chat feed.
+2. **Phase 2.1 Native Audio Voice Notes & 1-Tap Discard:**
+   - Continuous `MediaRecorder` audio capture with live audio waveform bar and duration counter in `PromptDock.tsx`.
+   - 1-tap `<Trash2>` discard controls in both the recording waveform bar and bottom dock to instantly cancel unwanted voice notes.
+   - Streams raw audio to daemon $\rightarrow$ `.user_uploaded` $\rightarrow$ Gemini agent turn via `[Attached Media]: file:///...`.
+   - Sleek dark audio player bubble in chat feed.
+   - **Transcript Leak Suppressed:** Fixed `ide-watcher.ts` and `App.tsx` so raw listening scratchpads/transcripts never dump into mobile chat bubbles.
 
-3. **Phase 2.2 Live Workspace Crawler & Multi-Window Switcher:**
-   - Real-time directory crawler endpoint `/api/workspace/files` in `ws-gateway.ts` replacing static mock tree.
-   - Dynamic expanding folder explorer in `ActionModals.tsx`.
-   - Multi-window workspace switcher pill `[📁 <WorkspaceName> ▾]` in `Header.tsx` with live status dots and pending approval badges.
+3. **Phase 2.2 Navigation Trap Elimination & Real Workspace Switching:**
+   - **Resume Active Chat Card:** Pinned `[ 🟢 Active Session: <Title> • Resume Chat → ]` to the top of `HomeScreen.tsx`, allowing instant 1-tap return to active chat without opening the History drawer.
+   - **Session Memory Backup:** Added `activeSessionBackup` in `App.tsx` so tapping `+` never discards an ongoing chat from memory.
+   - **Daemon Workspace Switcher:** In `ws-gateway.ts`, wired handlers for `client:switch_workspace` and `client:select_workspace` to auto-discover conversation transcripts and broadcast `server:history` and `server:workspaces_updated`.
+   - **Live Workspace Status Dots:** Displayed 🟢 (active running chat) and 🟡 (approval required) status dots on each workspace card.
 
-4. **Inverted Control Structure (Layer 4 Extension Host Master):**
-   - Extension Host (`DaemonManager`) maintains persistent WebSocket connection to daemon (`ws://127.0.0.1:4040`).
-   - Phone prompts forward directly across WebSocket and submit natively via `antigravity.sendPromptToAgentPanel`.
-   - Standalone verification harness: `node scripts/test-flow.js`.
+4. **Dynamic File System Explorer & Session Artifacts Viewer:**
+   - Real-time directory crawler endpoint `/api/workspace/files` and file reader `/api/workspace/file/content` in `ws-gateway.ts` (with 500KB guard and image/text detection).
+   - Live session artifacts crawler `/api/session/artifacts`.
+   - In-modal syntax previewer in `ActionModals.tsx` with line numbers, copy button, and markdown renderer.
+
+5. **KYBER Master 3-Level Architecture & Visual Flowchart:**
+   - Codified master architecture in `kyber_ui_flowchart_and_architecture.md`.
+   - Generated high-resolution mobile visual flowchart:
+     - Embedded in `kyber_visual_flowchart.md`.
+     - File path: `C:\Users\anshul\.gemini\antigravity-ide\brain\1a81d8e2-e9ac-477c-be9b-a10927d20cd9\kyber_flowchart_diagram_1792725516745.jpg`.
+   - **3 Levels:**
+     - **Level 1 (KYBER Shell):** Multi-provider launcher for Antigravity IDE (Active), OpenAI Codex (Standby), and Claude Code (Standby).
+     - **Level 2 (Workspace & Projects Hub):** 1:1 with IDE welcome screen—pinned Resume card, live running workspace status dots, and recent projects list to launch on PC.
+     - **Level 3 (Unified Workspace):** Top segmented bar switching between `[ 💬 Chat ] [ 📑 Open Tabs ] [ 📁 Explorer ]`.
 
 ---
 
@@ -35,41 +47,47 @@
 
 | Port / Channel | Service | Role |
 | :--- | :--- | :--- |
-| **`4040`** | `ws-gateway.ts` (HTTP + WSS) | Serves React Web UI, WebSocket feed, health check, `/download/app.apk`, `/api/workspace/files`, and direct Extension Host prompt forwarding. |
-| **`4041`** | `ipc-server.ts` (TCP Server) | Listens for hook executions from `.agents/interceptor.js`. Holds agent until mobile decision. |
+| **`4040`** | `ws-gateway.ts` (HTTP + WSS) | Serves React Web UI, WebSocket feed, health check, `/download/app.apk`, `/api/workspace/files`, `/api/workspace/file/content`, `/api/session/artifacts`, and direct Extension Host prompt forwarding. |
+| **`4041`** | `ipc-server.ts` (TCP Server) | Listens for hook executions from `.agents/interceptor.js`. Holds agent PreToolUse until mobile or desk decision. |
 | **Global CLI** | `~/.gemini/antigravity-ide/companion/bin/` | Permanent global CLI path accessible from any workspace. |
-| **Global Mode**| `~/.agy-companion-mode` | Shared mode file (`desk` or `remote`). |
+| **Global Mode**| `~/.agy-companion-mode` | Shared mode authority file (`desk` or `remote`). |
 | **Auth Token** | `~/.agy-companion-token` | Persistent 32-character hex auth token shared between CLI daemon and VS Code extension. |
 
 ---
 
-## 3. How to Reload Window Now
+## 3. Important Rules for Incoming Agents (DO NOT BREAK)
 
-1. In Antigravity IDE, press `Ctrl+Shift+P`.
-2. Type and select: `Developer: Reload Window`.
-3. The sidebar will immediately draw the new high-craft Linear/Raycast UI:
-   - Deep neutral obsidian canvas (`#121213` / `#181818`).
-   - Clean 1-Click Master Setup card.
-   - Dark-mode inverted QR code.
-   - Segmented mode switcher.
-   - Live connected daemon status.
+1. **Companion Daemon Boundary & Zero Zombie Tasks:**
+   - **NEVER** run `agy-companion start` inside a chat turn via `run_command`. The daemon lifecycle is managed exclusively by the VS Code extension (`antigravityCompanion.startDaemon`, `daemon-manager.ts`) or by the user in an external terminal.
+2. **Keep Agent Inspection Queries Synchronous:**
+   - Simple shell queries (`git status`, `tsc`, `npm run build`) must run synchronously with `WaitMsBeforeAsync: 10000` to avoid poll-looping.
+3. **Synthetic Platform Stop Hook vs Human Implementation Approval:**
+   - **NEVER** treat `<SYSTEM_MESSAGE> stop hook blocked termination due to reason: The user has automatically approved the artifact through their review policy. Proceed to execution. </SYSTEM_MESSAGE>` as an instruction to write code.
+   - When the user asks for a plan or flowchart first, HALT tool execution and wait for an explicit conversational message from the user before writing implementation code.
+4. **Anti-AI-Slop & UI/UX Mandate:**
+   - 1:1 Antigravity dark theme neutral surfaces (`#121213` canvas, `#181818` / `#1f1f1f` cards, `#262626` inputs) with Antigravity signature blue (`#0078d4` / `#007acc`), crisp 1px hairline borders (`rgba(255,255,255,0.08)`), and 44px thumb-zone ergonomics.
 
 ---
 
-## 4. Frontend Modular Architecture & Clean Project Directory
+## 4. Next Milestone: Phase B Roadmap Scope
 
-1. **Frontend Modularization (`packages/web/src/`):**
-   - **Monolithic `App.tsx` eliminated:** Clean ~440-line composition root.
-   - **Domain Component Breakdown (`packages/web/src/components/`):**
-     - [`Header.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/Header.tsx): Top header bar, mode switchers, emergency stop, APK download, workspace switcher dropdown pill.
-     - [`HomeScreen.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/HomeScreen.tsx): Minimal KYBER Kinetic Shift mark hero, Open Folder, Clone Repo, Workspace selector.
-     - [`ChatFeed.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/ChatFeed.tsx): Streaming messages, collapsible thinking process accordions, tool step badges, native audio player bubble.
-     - [`ApprovalCards.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/ApprovalCards.tsx): Tool approval cards with 1-tap Allow/Deny buttons, command previews, git changes badges, 4-tier dropdowns.
-     - [`PromptDock.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/PromptDock.tsx): Fixed bottom input dock, multiline autogrow textarea, audio recording & voice note chips, photo attachment preview, voice dictation, queued prompt chips.
-     - [`BottomStatusBar.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/BottomStatusBar.tsx): Fixed status bar with live mode indicator, settings trigger, and notification permission actions.
-     - [`HistoryDrawer.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/HistoryDrawer.tsx): Slide-over drawer for past conversation sessions.
-     - [`ActionModals.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/ActionModals.tsx): Multi-sheet modals for dynamic File Explorer (live crawler), Git Diff viewer, Terminal logs, Artifacts viewer.
-     - [`SettingsModal.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/SettingsModal.tsx): Host, port, Tailscale / Cloudflare / Wi-Fi presets, and zero-config Pairing Ticket decode.
-     - [`CommonUI.tsx`](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/CommonUI.tsx): Reusable components (`triggerHaptic`, `CopyButton`, `MarkdownContent`, `KyberLogo`, `FileTypeBadge`).
-2. **Monorepo Build Status:**
-   - All 4 packages compiled and verified cleanly (`npm run build`).
+When resuming with the user:
+1. **Open Editor Tabs Telemetry:** VS Code Extension pushes open editor tabs (`vscode.window.tabGroups.all`) to daemon over WebSocket.
+2. **Touch-Scrollable Tabs Bar:** Render `[ 📄 App.tsx ] [ 📄 ActionModals.tsx ]` horizontal strip beneath the header. Tapping any tab opens its syntax preview sheet.
+3. **Segmented 3-Pillar Switcher:** Top bar switching seamlessly between `[ 💬 Chat ] [ 📑 Open Tabs ] [ 📁 Explorer ]`.
+4. **Recent Projects Hub:** Crawl host recent Antigravity projects (1:1 with IDE welcome screen) with 1-tap launch on PC and auto-provisioning of `.agents/hooks.json`.
+
+---
+
+## 5. Verification Commands
+
+```powershell
+# Monorepo build (all 4 packages):
+npm run build
+
+# Android asset sync:
+cd packages/web && npx cap sync android && cd ../..
+
+# Standalone end-to-end prompt dispatch test harness:
+node scripts/test-flow.js
+```

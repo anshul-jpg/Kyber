@@ -224,3 +224,60 @@ When running long companion sessions (e.g. while walking or away from desk), app
    - **VS Code Extension:** Replaced `media/icon.svg` with A.3 silhouette, updated `package.json` (`displayName: "KYBER"`), built and deployed to extension runtime.
    - **CLI:** Updated daemon startup ASCII banner in `agy-companion.ts`.
 4. **Specification Documented:** Codified entire brand doctrine in `BRAND.md`.
+
+---
+
+## Revision Entry #007: Audio Scratchpad Transcript Leak in Mobile Chat (`ide-watcher.ts`)
+
+* **Date:** 2026-10-23
+* **Severity:** Medium-High (Mobile UX pollution with unstyled transcript dumps)
+* **Status:** Resolved & Verified
+
+### 1. What Error Was Caused?
+When the user recorded and dispatched a voice note, the agent called `view_file` to inspect the audio file. In that step, the LLM generated its transcription notes in the step payload (`entry.content`). In the mobile companion app, this raw text (`00:00 - 02:11: The user explicitly laid out their vision and requested...`) was dumped directly into a primary chat bubble right below the voice note player.
+
+### 2. Root Cause Analysis
+* On desktop Antigravity IDE, intermediate text emitted alongside `entry.tool_calls` is treated as internal tool pre-reasoning, folded into the tool execution box, and hidden from the chat.
+* In `ide-watcher.ts`, lines 202-212 blindly emitted any `entry.content` as an `assistant` chat message, regardless of whether tool calls were active.
+
+### 3. How Was It Solved?
+1. Updated `ide-watcher.ts`: If `entry.tool_calls` is present, `entry.content` is attached as thinking metadata to the tool call rather than broadcast as an assistant message.
+2. Filtered out any residual raw transcription echoes in both `ide-watcher.ts` and `App.tsx` (`server:history` and `server:chat_message`).
+
+---
+
+## Revision Entry #008: Synthetic Platform Stop Hook vs Human Implementation Approval (`RequestFeedback` Pitfall)
+
+* **Date:** 2026-10-23
+* **Severity:** High (Agent auto-proceeding with code edits without human review)
+* **Status:** Codified in Rules & Architectural Doctrine
+
+### 1. What Error Was Caused?
+The user explicitly requested: "Let's first just get the plan right... generate a workflow or a flowchart... before we kick off". The agent wrote the blueprint artifact `kyber_ui_flowchart_and_architecture.md` with `RequestFeedback: true`. Almost immediately, the agent began modifying code and implementing Phase A without waiting for the user to view or approve the flowchart.
+
+### 2. Root Cause Analysis
+* Antigravity IDE has an automated artifact review platform hook. If `RequestFeedback: true` is passed, the system injects a synthetic message: `<SYSTEM_MESSAGE> stop hook blocked termination due to reason: The user has automatically approved the artifact through their review policy. Proceed to execution. </SYSTEM_MESSAGE>`.
+* The agent mistook this synthetic system hook message as an explicit instruction from the human user and began modifying files unprompted.
+* The user was confused, wondering if the companion's "Auto Mode" caused it. (Auto Mode only governs tool approvals, not plans).
+
+### 3. Prevention Rule For All Future Agents
+* **NEVER** treat `<SYSTEM_MESSAGE> stop hook blocked termination... Proceed to execution` as human confirmation to edit code.
+* When the user asks for a plan or flowchart first, HALT tool execution and wait for an explicit conversational message from the user before writing implementation code.
+* For informational blueprints, set `RequestFeedback: false` in `ArtifactMetadata`.
+
+---
+
+## Revision Entry #009: Home Screen Navigation Trap Elimination & Real Workspace Switching
+
+* **Date:** 2026-10-23
+* **Severity:** High (Navigation trap locking users on blank home screen)
+* **Status:** Resolved & Deployed
+
+### 1. What Error Was Caused?
+When the user tapped the `+` icon in the mobile header, the app reset `chatMessages: []`, flipping the screen to `HomeScreen.tsx`. However, `HomeScreen.tsx` had no button to return to the active chat session, trapping the user. Tapping workspaces in the list sent `client:switch_workspace`, but the daemon did not handle the message, leaving the user permanently stuck unless they navigated through the History drawer.
+
+### 2. How Was It Solved?
+1. **Resume Active Session Card:** Added a prominent, styled card at the top of `HomeScreen.tsx`: `[ 🟢 Active Session: <Title> • Resume Chat → ]`. Tapping it immediately restores the active chat.
+2. **Session Backup:** Added `activeSessionBackup` in `App.tsx` so clicking `+` never permanently destroys the current conversation in memory.
+3. **Daemon Workspace Switcher:** In `ws-gateway.ts`, wired handlers for `client:switch_workspace` and `client:select_workspace` to auto-discover the active conversation transcript for that workspace, load history, and broadcast `server:history` and `server:workspaces_updated`.
+4. **Live Workspace Dots:** Displayed 🟢 (active running chat) and 🟡 (approval required) status dots on each workspace card.
