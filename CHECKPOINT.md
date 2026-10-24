@@ -91,3 +91,20 @@ cd packages/web && npx cap sync android && cd ../..
 # Standalone end-to-end prompt dispatch test harness:
 node scripts/test-flow.js
 ```
+
+---
+
+## 6. High-Priority Post-IDE Restart Lifecycle & Verification Matrix
+
+> **HIGH PRIORITY / CRITICAL FOCUS:** When Antigravity IDE restarts or when the user updates the companion APK/web app and reconnects from mobile, all 5 lifecycle pillars MUST hold without exception:
+
+| Lifecycle Phase | Failure Mode Observed | Permanent Root Cause Fix Applied | Status |
+| :--- | :--- | :--- | :--- |
+| **1. Hook Interceptor & Popups** | Modals appeared on PC desktop screen even in Remote / Auto mode. | Strict 3-mode policy in [.agents/interceptor.js](file:///d:/CODE/antigravity%20compainion/.agents/interceptor.js): Remote mode NEVER emits `force_ask` or `ask` to IDE; Auto mode auto-allows (`allow`) without asking; Desk mode prompts PC (`force_ask`). | **VERIFIED** |
+| **2. Daemon Process Persistence** | Daemon process terminated when IDE window closed due to `EPIPE` pipe errors. | Spawned with `detached: true` & `unref()` in `daemon-manager.ts`; wrapped `process.stdout`/`stderr` with `EPIPE` error suppression in `agy-companion.ts`. | **VERIFIED** |
+| **3. Extension Host Re-attachment** | Extension host lost connection on reload or failed to re-attach. | `DaemonManager.probeRunningDaemon()` automatically reconnects internal monitoring WebSocket on port 4040 and drains any buffered prompts held in `pendingHostPrompts`. | **VERIFIED** |
+| **4. Paused Approval Retention** | Reconnecting phone lost pending approval cards after 120s timeout. | `HookIpcServer.getPendingRequests()` in `ipc-server.ts` now retains both active AND paused requests (`[...pendingRequests, ...pausedRequests]`), preventing `workspaceManager` from purging cards on client handshake. | **VERIFIED** |
+| **5. Mobile App State & Mode Sync** | Mobile app lost selected mode on phone reboot or APK update. | Initialized and persisted `companionMode` in `localStorage` (`agy_companion_mode`) across app launches, updates, and reconnects in `App.tsx`. | **VERIFIED** |
+| **6. Pure `decision: 'allow'` & Zero Double-Prompts** | Commands approved on mobile still popped up secondary confirmation modal on desktop PC IDE. | Removed `permissionOverrides` from all `decision: 'allow'` returns across [.agents/interceptor.js](file:///d:/CODE/antigravity%20compainion/.agents/interceptor.js), `ipc-server.ts`, and hook templates. Pure `{ decision: 'allow' }` executes without desktop confirmation modals. | **VERIFIED** |
+
+

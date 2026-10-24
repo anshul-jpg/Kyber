@@ -6,7 +6,7 @@ import { CompanionSidebarProvider } from './sidebar-provider';
 
 export function activate(context: vscode.ExtensionContext) {
   const daemonManager = new DaemonManager(context);
-  const hookManager = new HookManager();
+  const hookManager = new HookManager(context.extensionPath);
   const statusBar = new CompanionStatusBar(daemonManager);
   statusBar.show();
 
@@ -184,6 +184,45 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(statusBar);
+
+  // Active Editor Tabs Synchronization to Companion Daemon
+  function syncActiveTabs() {
+    try {
+      const tabs: import('@agy-companion/protocol').EditorTab[] = [];
+      if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
+        for (const group of vscode.window.tabGroups.all) {
+          for (const tab of group.tabs) {
+            const input = tab.input as any;
+            const uri: vscode.Uri | undefined = input?.uri || input?.modified;
+            let filePath = uri?.fsPath || '';
+            if (uri) {
+              const rel = vscode.workspace.asRelativePath(uri, false);
+              if (rel) filePath = rel.replace(/\\/g, '/');
+            }
+            tabs.push({
+              label: tab.label,
+              path: filePath,
+              isActive: tab.isActive && group.isActive,
+              isDirty: tab.isDirty,
+            });
+          }
+        }
+      }
+      daemonManager.updateActiveTabs(tabs);
+    } catch {}
+  }
+
+  if (vscode.window.tabGroups) {
+    context.subscriptions.push(
+      vscode.window.tabGroups.onDidChangeTabs(() => syncActiveTabs()),
+      vscode.window.tabGroups.onDidChangeTabGroups(() => syncActiveTabs())
+    );
+  }
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor(() => syncActiveTabs())
+  );
+
+  setTimeout(syncActiveTabs, 1500);
 
   // Smart Auto-Start Rules Checker
   function checkAutoStart() {

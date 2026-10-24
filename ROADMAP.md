@@ -58,6 +58,25 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
 
 ## 4. Prioritized Feature Backlog (Beta 2 & Beyond)
 
+### Phase 2.0: Post-IDE Restart Lifecycle & Remote Autonomy (Highest Priority)
+- [x] **Zero Desktop Popup Leakage in Remote Mode:**
+  - Strict 3-mode interceptor doctrine in `.agents/interceptor.js`.
+  - In Remote Mode, interceptor guarantees ZERO `force_ask` or `ask` leaks to IDE stdout across daemon disconnects, timeouts, or exceptions.
+  - Failures in Remote Mode freeze execution safely (`decision: 'deny'`) rather than popping modals on an empty desk.
+- [x] **Autonomous Auto Mode (Zero Prompts):**
+  - Auto mode auto-allows tool execution without asking (`decision: 'allow'`).
+  - Forced questions (`ask_question`) route to the active target device (Phone if Remote, PC if Desk).
+  - Fully eliminated the flawed `getAutoModeResolution()` presence guessing heuristic.
+- [x] **Daemon Detached Process Boundary & EPIPE Protection:**
+  - Daemon spawned with `detached: true` and `unref()` so closing the IDE never kills the supervisor process.
+  - Process stdout/stderr wrapped with `EPIPE` error suppression listeners.
+- [x] **Post-Restart Extension Host Re-attachment:**
+  - `DaemonManager.probeRunningDaemon()` re-attaches to the active daemon session on port 4040, registers active workspace, and drains buffered prompts from `pendingHostPrompts`.
+- [x] **Paused Approval Retention Across Client Handshakes:**
+  - `HookIpcServer.getPendingRequests()` in `ipc-server.ts` returns both active and paused requests (`[...pendingRequests, ...pausedRequests]`), preventing workspace managers from wiping paused cards on reconnect.
+- [x] **Client-Side Mode & Policy State Persistence:**
+  - Phone companion (`App.tsx`) initializes and persists `companionMode` in `localStorage` (`agy_companion_mode`), surviving mobile reboots and APK updates.
+
 ### Phase 2.1: Native App Polish & Core Gaps
 - [x] **Native Audio Voice Notes (Gemini Multimodal Audio):**
   - Continuous `MediaRecorder` audio capture with live recording pulse bar and duration counter.
@@ -69,41 +88,33 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
 - [x] **Microphone Voice Dictation in Android App:** Implemented native `RecognizerIntent.ACTION_RECOGNIZE_SPEECH` via `AndroidHost.startVoiceInput()` in `MainActivity.java` with automatic transcription event feed into `PromptDock`.
 - [x] **Resilient In-App Updater via Native DownloadManager:** Replaced manual `HttpURLConnection` with Android's system `DownloadManager`, featuring background system tray download notifications and automatic package installer launching.
 - [x] **Queued Prompt Override, Force Send & Inline Edit:** Added `[⚡ Force Send]`, `[✎ Edit]`, and `[✕ Cancel]` pills in `PromptDock.tsx` and `ChatFeed.tsx` for immediate turn override, in-place prompt editing, and queue pruning.
-- [ ] **AI Model Directive Binding:** Wire the model dropdown in `PromptDock` to inject model directives into the prompt wrapper or route to IDE selection.
+- [x] **AI Model Directive Binding:** Wire the model dropdown in `PromptDock` to inject model directives into the prompt wrapper or route to IDE selection (`Gemini 3.8 Flash High/Mid/Low`, `Claude Opus/Sonnet 4.5`, `GPT-4.5`, `GPT OSS`).
+- [x] **Recent Projects Hub:** Discovered host recent Antigravity projects from `storage.json` with 1-tap in-place launch on PC and auto-provisioning of `.agents/hooks.json`.
+- [x] **Live Terminal Stream:** Intercept `RUN_COMMAND` IDE events in `ide-watcher.ts` and stream live console output with command banners, timestamps, and exit-code badges into `ActionModals.tsx`.
+- [x] **Git Diff Inspection Cards:** Unified diff chunks inside tool approval cards and "File Changes" modal with auto-expansion on file edits, +ins/-del counts, and line-by-line syntax highlighting.
+- [x] **Multi-Workspace & History Drawer:** Full multi-workspace switching and historical conversation browsing from the sidebar drawer.
+- [x] **XSS Sanitization in Markdown Renderer (`CommonUI.tsx`):**
+  - Sanitize markdown HTML outputs before injecting into the DOM, eliminating code execution risks from previewed files.
 
-### Phase 2.2: Deep IDE Inspection & Concurrent Workspace Management
-- [x] **Concurrent Multi-Window Workspace Switcher:**
-  - **Discrete Workspace Containers:** Each open IDE window is treated as an isolated container on the phone companion (`Container A: antigravity compainion`, `Container B: FIRE TV`).
-  - **Dynamic File System Explorer & Tap-to-Preview:** Replaced static mock in `ActionModals.tsx` with live `/api/workspace/files` crawler. Tapping any file fetches `/api/workspace/file/content` and opens an in-modal preview sheet with line numbers, copy button, and markdown/image rendering.
-  - **Live Session Artifacts Viewer:** Replaced static mock in `ActionModals.tsx` with live `/api/session/artifacts` crawler that lists real conversation artifacts (`.md`, `.png`, `.jpg`, `.ts`) with sizes, timestamps, and full preview capability.
-  - **Header Workspace Switcher Pill (`[📁 <WorkspaceName> ▾]`):** 1-tap dropdown in the phone header displaying active container name, live status dots (`Idle` / `Busy` / `Waiting Approval`), pending approval counters, and immediate project switching.
-  - **Multi-Window Approval Isolation:** Approval cards display prominent workspace badges (`[FIRE TV]` vs `[antigravity compainion]`) so you know exactly which project requires tool approval.
-- [x] **Home Screen Navigation Trap Elimination & Real Workspace Switching:**
-  - Added **`[ 🟢 Active Session: <Title> • Resume Chat → ]`** card to `HomeScreen.tsx` so users can always return to their active conversation in 1 tap.
-  - In `ws-gateway.ts`, wired `client:switch_workspace` and `client:select_workspace` to auto-discover conversation transcripts and broadcast `server:history` and `server:workspaces_updated`.
-  - Added live status dots (🟢/🟡) to workspace cards on the home screen.
-  - Preserved `activeSessionBackup` in `App.tsx` so clicking `+` never discards an ongoing chat from memory.
-- [x] **Audio Scratchpad Transcript Leak Suppression:**
-  - Suppressed intermediate `entry.content` accompanying tool calls in `ide-watcher.ts`.
-  - Added sanitization filters in `App.tsx` so voice note transcripts never dump into chat bubbles.
-- [x] **KYBER 3-Level Master Architecture & Visual Flowchart:**
-  - Codified master architecture in `kyber_ui_flowchart_and_architecture.md`.
-  - Generated mobile visual diagram (`kyber_flowchart_diagram_1792725516745.jpg`) and documented in `kyber_visual_flowchart.md`.
-- [ ] **Phase B: Active Editor Tabs Bar & Recent Projects Integration (Next Priority):**
-  - **Open Editor Tabs Telemetry:** VS Code Extension pushes open editor tabs (`vscode.window.tabGroups.all`) to daemon over WebSocket.
-  - **Touch-Scrollable Tabs Bar:** Render `[ 📄 App.tsx ] [ 📄 ActionModals.tsx ]` horizontal strip beneath the header. Tapping any tab opens its syntax preview sheet.
-  - **Segmented 3-Pillar Switcher:** Top bar switching seamlessly between `[ 💬 Chat ] [ 📑 Open Tabs ] [ 📁 Explorer ]`.
-  - **Recent Projects Hub:** Crawl host recent Antigravity projects (1:1 with IDE welcome screen) with 1-tap launch on PC and auto-provisioning of `.agents/hooks.json`.
-- [ ] **Fail-Safe Pause & Tap-to-Resume Approval Gating:**
-  - In Remote Mode, when the 120s fail-safe timeout triggers on an unapproved mutating tool call, replace the fallback to desktop auto-run (`decision: 'ask'`) with an authoritative execution freeze (`decision: 'deny'`) with reason: `Execution Paused: Waiting for mobile approval. Chat suspended.`
-  - Guarantees zero unattended file mutations or shell executions while the user is away from both PC and phone.
-  - Phone approval card transitions into a persistent `[ ⏸️ PAUSED • Tap Allow to Resume ]` state (and syncs cleanup of expired pending states to eliminate "ghost cards").
-  - When the user returns and taps **Allow** (or texts "Approved / Proceed" in the bottom dock), the daemon detects the late approval and dispatches an automated continuation prompt (`Approved: Proceed with <toolTitle>`) through the Extension Host, seamlessly waking the agent to run the tool and continue the turn.
-- [ ] **Live Terminal Stream:** Wire terminal stdout into `ActionModals.tsx` so users can inspect active build logs and script outputs directly from their phone.
-- [ ] **Git Diff Inspection Cards:** Render unified diff chunks inside the "File Changes" modal so users can review exact code additions/deletions before granting tool approval.
-- [ ] **Multi-Workspace & History Drawer:** Full multi-workspace switching and historical conversation browsing from the sidebar drawer.
+### Phase 2.3: Multi-Account Quota Pool & Automated Relay (Token Preservation)
+- [ ] **Proactive & Reactive Quota Detection:**
+  - **Status Bar & Language Server Telemetry:** Monitor remaining Gemini token allowance and weekly quota percentages directly from the IDE host.
+  - **HTTP 429 / Rate-Limit Gate (Fail-Safe):** Intercept `RESOURCE_EXHAUSTED` / `429 Quota Exceeded` errors in `ide-watcher.ts` to trigger an instant emergency account relay before turns abort.
+- [ ] **Automated < 10% Quota Trigger & Switching:**
+  - Configurable threshold (default: 10% remaining weekly quota).
+  - Automated desktop account / profile rotation via VS Code Extension Host (`workbench.profiles.actions.switchProfile` or `vscode.authentication.getSession`).
+- [ ] **Zero-Context-Loss Session Handoff (The 4-Step Relay):**
+  - **Step 1 (Session Snapshot):** Capture active turn history, goal, open files, and git diff in a serialized `session_handoff.json`.
+  - **Step 2 (Profile / Account Swap):** Extension switches active desktop account or profile and executes soft reload (`workbench.action.restartExtensionHost`).
+  - **Step 3 (Permission & Policy Re-Arming):** Re-attaches `.agents/interceptor.js` and `.agents/hooks.json` with explicit `permissionOverrides` so new user profile does not fall back to IDE desktop approval prompts.
+  - **Step 4 (Context Primer Turn):** Automatically injects a continuation handover turn into the new account session (`[KYBER Handover]: Resumed from Account A (Quota < 10%). Current goal: <goal>. Last action: <step>. Continue.`).
+- [ ] **Mobile Control & Mission Control Dashboard:**
+  - **Real-Time Quota Gauges:** Render account pool cards in phone Settings / Drawer (`Account A: 8% [Auto-Switch Armed]`, `Account B: 95%`).
+  - **Auto-Switch Toggle:** `[⚡ Auto-Switch at < 10% Quota: ON/OFF]` with custom threshold selector (5%, 10%, 15%).
+  - **1-Tap Manual Account Switch:** Swap active host IDE accounts directly from your phone while away from desk.
+  - **Push Notification Alerts:** Send native push notifications on Android / Web: *"⚠️ Account A dropped below 10%. Seamlessly switched to Account B. Context and approvals preserved."*
 
-### Phase 2.3: Hardware Wake & Standby Resilience (Near-Immediate Future Scope)
+### Phase 2.4: Hardware Wake & Standby Resilience (Near-Immediate Future Scope)
 - [ ] **Wake-on-LAN (WoL) Open Connector:**
   - When the host PC enters Windows Modern Standby (S0ix) or sleeps (`ide-status: dormant`), the mobile phone UI surfaces a 1-tap `[⚡ Wake PC]` action in the disconnected / dormant banner.
   - Tapping dispatches a UDP magic packet (MAC address broadcast to ports 7/9) across the local subnet and Tailscale mesh to wake the host desktop automatically.
@@ -112,7 +123,7 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
 - [ ] **Seamless Dormant-to-Active Queue Rehydration:**
   - Mobile prompt dock transitions queued offline prompts directly into the host agent the instant the machine wakes and heartbeats resume.
 
-### Phase 2.4: Visual Identity, Brand System & Pre-Launch Rebranding
+### Phase 2.5: Visual Identity, Brand System & Pre-Launch Rebranding
 - [x] **Official Product Rebranding to KYBER:** Rebranded from working title to **KYBER** (Greek *κυβερνήτης* — helmsman, navigator, pilot; root of cybernetics).
 - [x] **Official Geometric Mark ("The Kinetic Shift" / Variation A.3):** Engineered precision dual-diamond vertically offset facets with hairline tension slit (`[48.5,18 22,58 48.5,98]` and `[51.5,2 78,42 51.5,82]`). Stark monochrome obsidian palette (`#ffffff`, `#a1a1aa`, `#121213`).
 - [x] **Master Brand Identity Specification (`BRAND.md`):** Complete design doctrine locked in: "The Autonomous Pocket Supervisor". Established obsidian surface tokens (`#121213`/`#181818`/`#1f1f1f`), crisp hairline borders, tactile 44px ergonomics, zero-slop anti-emoji rules, and haptic signature profiles.
@@ -121,9 +132,25 @@ KYBER transforms local AI agent development from an anchor at a desk into a deco
   - **Android Native App:** Updated `ic_launcher_background.xml` (`#121213`), updated `ic_launcher_foreground.xml` with A.3 vector silhouette, updated `strings.xml` (`app_name` = `KYBER`, `title_activity_main` = `KYBER`), updated `capacitor.config.ts`.
   - **VS Code Extension:** Updated `media/icon.svg`, updated `package.json` (`displayName: "KYBER"` and activity bar title), built and deployed to live extension directory.
   - **CLI Daemon:** Updated `agy-companion.ts` ASCII banner to `KYBER`.
-- [ ] **VS Code Sidebar Template Header Unification (On Hold):** Update `sidebar-template.ts` header to display KYBER with A.3 SVG mark.
-- [ ] **Notification Beautification:** Modernize the persistent notification using styled category headers, monospace command badges, and Linear-style status indicators.
-- [ ] **Tactile Audio Feedback (On Hold):** Replace generic Web Audio beeps with subtle, tactile audio cues synthesized for status changes, approval prompts, and turn completions.
+### Phase 2.6: Security, System Hardening & Field Test Resilience
+- [x] **Daemon Auth Token Verification (`ws-gateway.ts`):**
+  - Enforce token verification on WebSocket connection upgrades and sensitive HTTP endpoints (`/api/prompt`, `/api/hook/approval`, `/api/workspace/files`, `/api/workspace/file/content`, `/api/stop`).
+  - Reject unauthenticated requests from local network or public Cloudflare tunnels, validating against `~/.agy-companion-token`.
+- [x] **Path Traversal Containment Guard (`ws-gateway.ts`):**
+  - Replace naive `targetPath.startsWith(rootPath)` with canonical path relative containment (`path.relative(rootPath, targetPath)`).
+  - Normalize path casing on Windows to prevent directory traversal escapes.
+- [x] **Dynamic Host Dispatch for Android Lockscreen Service (`CompanionForegroundService.java`):**
+  - Store the active host URL in Android `SharedPreferences` upon pairing/connecting.
+  - Dynamically route 1-tap lockscreen Allow/Deny decisions to the connected host over cellular/Tailscale/tunnel instead of hardcoded dev IP.
+- [x] **Non-Blocking Git Telemetry (`ipc-server.ts`):**
+  - Transition synchronous `execSync('git ...')` to asynchronous non-blocking calls with a 3-second cache.
+  - Guarantees the Node.js event loop never freezes during rapid tool calls, preventing mobile heartbeat drops.
+- [x] **Windows Drive Casing Workspace Deduplication (`workspace-manager.ts`):**
+  - Lowercase Windows paths before base64 ID hashing to eliminate duplicate ghost containers (`d:\` vs `D:\`).
+- [x] **Bounded Transcript Reading for History Discovery (`ide-watcher.ts`):**
+  - Stream/read only the first 2KB of session logs to extract conversation titles instead of reading 20MB files into memory synchronously.
+- [x] **XSS Sanitization in Markdown Renderer (`CommonUI.tsx`):**
+  - Sanitize markdown HTML outputs before injecting into the DOM, eliminating code execution risks from previewed files.
 
 ---
 
@@ -220,6 +247,67 @@ Once the Beta 1/2 baseline is locked, the codebase will be shared in a private t
    - Build the `ClaudeCodeAdapter` wrapping Claude Code CLI stdio and permission prompts.
    - Allow switching from Antigravity to Claude Code on your phone with zero reconnect friction.
 
-### Hardware Wake & Resilience Connectors
-- **Wake-on-LAN (WoL) Magic Packets:** When the companion detects the host PC is sleeping or offline (`ide-status: dormant`), provide a 1-tap `[⚡ Wake PC]` button that dispatches a UDP magic packet across the Tailscale / local subnet to boot the host machine.
-- **Smart Plug Automation Connector:** Webhook/MQTT connector allowing developers to toggle a smart plug (e.g., Home Assistant, Tuya, Kasa) to remotely power cycle the desktop if the OS enters an unresponsive freeze.
+### Hardware Wake & Resilience Connectors (Scheduled Tomorrow)
+- [ ] **Wake-on-LAN (WoL) Magic Packets:** When the companion detects the host PC is sleeping or offline (`ide-status: dormant`), provide a 1-tap `[⚡ Wake PC]` button that dispatches a UDP magic packet across the Tailscale / local subnet to boot the host machine.
+- [ ] **Smart Plug Automation Connector:** Webhook/MQTT connector allowing developers to toggle a smart plug (e.g., Home Assistant, Tuya, Kasa) to remotely power cycle the desktop if the OS enters an unresponsive freeze.
+
+---
+
+## 8. The Four Strategic Horizons of KYBER
+
+### Horizon 1: Multi-Model Dogfooding, Open Connectors & Hardware WoL (Immediate 24–48 Hours / Tomorrow)
+*Target: Personal dogfooding, baseline rock-solid multi-provider support, zero-standby wake.*
+- [x] **Host Physical RAM & CPU Telemetry Pipeline (`os.freemem()` / `os.totalmem()`):** Real-time hardware telemetry pushed to mobile settings dock; instantaneous memory reclaimed counter.
+- [x] **Remote IDE Process Lifecycle Governance:** 1-tap `[Close IDE]` (terminates heavy IDE processes via `taskkill` to reclaim ~3.5GB RAM while keeping the 30MB daemon alive) and `[Restart IDE]` from phone.
+- [ ] **Wake-on-LAN (WoL) UDP Magic Packet Emitter:**
+  - Send UDP broadcast magic packets (ports 7 & 9) over local Wi-Fi / Tailscale subnet to boot/wake sleeping PCs from the dormant mobile banner.
+- [ ] **Smart Plug Remote Automation Port:**
+  - Webhook/MQTT connector allowing developers to toggle a smart plug (Home Assistant, Tuya, Kasa) to remotely power cycle frozen workstations.
+- [ ] **Claude Code Adapter Prototype (`ClaudeCodeAdapter`):**
+  - Stdio / PTY process wrapper around Claude Code CLI.
+  - Intercept interactive tool permissions (`y` / `n` / `always`) and pipe into phone lockscreen approval loop without needing a VS Code extension.
+  - Stream ANSI terminal execution into the mobile terminal sheet.
+- [ ] **Universal Cockpit Provider Accents:**
+  - Dynamic brand accent tokens: Antigravity Electric Blue (`#0078d4`), Claude Warm Terracotta (`#d97706`), OpenAI Mint Green (`#10b981`).
+- [ ] **Multi-IDE RAM Allocation Safeguard:**
+  - Interactive prompt when switching active providers: `[⚡ Close Previous IDE to Free RAM (~2GB)]` vs `[Keep Both Running]`.
+
+### Horizon 2: Intelligence, Quota Governance & Autonomous Relays (Near Term)
+*Target: Self-healing autonomy, token preservation, uninterrupted multi-day agent runs.*
+- [ ] **Multi-Account Quota Pool & Automated Relay (Token Preservation):**
+  - Continuous token & quota telemetry via IDE status bar / LSP monitoring.
+  - Intercept HTTP `429 Too Many Requests` / `RESOURCE_EXHAUSTED` before turns abort.
+  - Automated <10% weekly quota trigger to switch desktop accounts/profiles (`workbench.profiles.actions.switchProfile`).
+  - **The 4-Step Zero-Context Relay:** Snapshot session (`session_handoff.json`) → swap profile → re-arm hook overrides → inject continuation handover prompt.
+- [ ] **Mobile Mission Control Quota Dashboard:**
+  - Real-time quota gauges in phone Settings / Drawer (`Account A: 8% [Armed]`, `Account B: 95%`).
+  - 1-tap manual account rotation from phone; native push alerts on seamless handover.
+- [ ] **Battery Resilience & OEM Doze Shielding:**
+  - Secondary Android `AlarmManager` heartbeat revival to resurrect `CompanionForegroundService` if killed during prolonged deep sleep.
+
+### Horizon 3: Tri-Force Team Division & Private Multi-Dev Collaboration (Mid Term)
+*Target: Parallel scaling across private repository; modular multi-agent adapters.*
+- **Stream 1: Core Daemon Engine & Antigravity Provider (Anshul + Antigravity)**
+  - Core daemon, Tailscale mesh, Android APK / foreground service (ID 9001), Antigravity adapter, multimodal Gemini voice notes, recent project hub.
+- **Stream 2: Codex Companion Provider (Collaborator 1)**
+  - Build `CodexAdapter` plugging directly into daemon IPC and WebSocket gateway.
+  - Route Codex sessions, approvals, and unified diff previews to the unified mobile UI.
+- **Stream 3: Claude Code Companion Provider (Collaborator 2)**
+  - Build `ClaudeCodeAdapter` wrapping Claude Code CLI stdio/PTY, permission prompts, and token cost tracking.
+- **Strict Open-Connector Interfaces:**
+  - Formalize `@agy-companion/provider-sdk` with standard `AgentAdapter` interface (`connect()`, `onPreToolUse()`, `sendPrompt()`, `stop()`, `getHistory()`).
+
+### Horizon 4: Open-Source Public Distribution & Global Launch (December 4th Milestone)
+*Target: Seamless zero-config adoption for the global developer ecosystem; 100% private until launch.*
+- [ ] **The 60-Second Onboarding Experience:**
+  - Zero-config `npx kyber` command printing terminal ASCII QR code with pairing ticket.
+  - 30-second camera scan connection with zero cloud accounts or port-forwarding setup.
+- [ ] **VS Code Marketplace Publication:**
+  - Official extension listing with 1-click hook activation and status bar companion dock.
+- [ ] **Android Distribution & In-App APK Self-Updater:**
+  - Automated GitHub Releases APK hosting, F-Droid submission, or Google Play companion listing.
+- [ ] **CI/CD Automation Pipeline:**
+  - Automated GitHub Actions matrix: typecheck, lint, Vite build, headless Gradle build, and npm CLI package publishing.
+- [ ] **Zero-Leakage Privacy Policy:**
+  - Repository remains 100% private and offline until the public hackathon submission on December 4th.
+

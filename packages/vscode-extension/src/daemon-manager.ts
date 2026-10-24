@@ -15,6 +15,7 @@ import {
   HOOK_IPC_PORT,
   encodePairingTicket,
   QuickAction,
+  EditorTab,
 } from '@agy-companion/protocol';
 import { DaemonStatus, PairingEndpoint, ConnectedDevice, CompanionMode, MeshStatus, LogLine } from './types';
 
@@ -54,7 +55,7 @@ export class DaemonManager extends EventEmitter {
 
   public getEffectiveMode(): 'remote' | 'desk' | 'autonomous' {
     if (this.currentMode === 'auto') {
-      return this.phoneCount > 0 ? 'remote' : 'desk';
+      return 'autonomous';
     }
     return this.currentMode;
   }
@@ -272,6 +273,11 @@ export class DaemonManager extends EventEmitter {
       return;
     }
 
+    // Always persist IDE executable path so remote restart commands can relaunch it
+    try {
+      fs.writeFileSync(path.join(os.homedir(), '.agy-ide-path'), process.execPath, 'utf8');
+    } catch {}
+
     const config = vscode.workspace.getConfiguration('antigravityCompanion');
     const port = config.get<number>('gatewayPort', DEFAULT_DAEMON_PORT);
 
@@ -320,11 +326,23 @@ export class DaemonManager extends EventEmitter {
     }
 
     try {
+
       this.daemonProcess = spawn('node', args, {
         cwd: path.dirname(cliScript),
-        env: { ...process.env },
+        env: {
+          ...process.env,
+          ANTIGRAVITY_IDE_EXEC_PATH: process.execPath,
+        },
+        detached: true,
         shell: false,
+        windowsHide: true,
       });
+      try {
+        this.daemonProcess.unref();
+      } catch {}
+
+      this.daemonProcess.stdout?.on('error', () => {});
+      this.daemonProcess.stderr?.on('error', () => {});
 
       this.daemonProcess.stdout?.on('data', data => {
         const text = data.toString();
@@ -389,6 +407,9 @@ export class DaemonManager extends EventEmitter {
     const globalModePath = path.resolve(os.homedir(), '.agy-companion-mode');
     try {
       fs.writeFileSync(globalModePath, newMode, 'utf8');
+      if (newMode === 'remote' || newMode === 'desk') {
+        fs.writeFileSync(path.resolve(os.homedir(), '.agy-companion-target'), newMode, 'utf8');
+      }
     } catch {}
 
     // Broadcast over WebSocket if active
@@ -514,6 +535,17 @@ export class DaemonManager extends EventEmitter {
     }
   }
 
+  public updateActiveTabs(tabs: EditorTab[]): void {
+    if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
+      this.wsClient.send(
+        JSON.stringify({
+          type: 'client:update_tabs',
+          tabs,
+        })
+      );
+    }
+  }
+
   private findDaemonScript(): string | null {
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const candidatePaths = [
@@ -563,13 +595,18 @@ export class DaemonManager extends EventEmitter {
     return null;
   }
 
-  public async injectPromptIntoIde(prompt: string, images?: { base64: string; name: string }[]): Promise<void> {
+  public async injectPromptIntoIde(prompt: string, images?: { base64: string; name: string }[], model?: string): Promise<void> {
     this.recordActivity();
-    this.addLogLine(`[Prompt Received from Phone]: "${prompt.slice(0, 50)}..."`, 'info');
+    let finalPrompt = prompt;
+    if (model && !model.toLowerCase().includes('flash')) {
+      finalPrompt = `[Model Directive: ${model}]\n${prompt}`;
+      this.addLogLine(`[Model Directive Applied]: ${model}`, 'info');
+    }
+    this.addLogLine(`[Prompt Received from Phone]: "${finalPrompt.slice(0, 50)}..."`, 'info');
 
     // 1. Primary: Native Antigravity IDE Agent Panel submission (verified in IDE binary)
     try {
-      await vscode.commands.executeCommand('antigravity.sendPromptToAgentPanel', prompt);
+      await vscode.commands.executeCommand('antigravity.sendPromptToAgentPanel', finalPrompt);
       this.addLogLine(`[Prompt Dispatched] Delivered directly to Antigravity Agent Chat Panel`, 'info');
       return;
     } catch (err: any) {
@@ -642,6 +679,7 @@ export class DaemonManager extends EventEmitter {
       const out = execSync(`netstat -ano -p tcp | findstr :${port}`, {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
       });
       const myPid = process.pid;
       for (const line of out.split('\n')) {
@@ -650,7 +688,7 @@ export class DaemonManager extends EventEmitter {
           const pid = parseInt(parts[parts.length - 1], 10);
           if (pid && pid !== myPid) {
             try {
-              execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore' });
+              execSync(`taskkill /F /PID ${pid}`, { stdio: 'ignore', windowsHide: true });
             } catch {}
           }
         }
@@ -789,7 +827,14 @@ export class DaemonManager extends EventEmitter {
         break;
 
       case 'server:forward_prompt':
-        this.injectPromptIntoIde(msg.prompt, msg.images);
+        this.injectPromptIntoIde(msg.prompt, msg.images, msg.model);
+        break;
+
+      case 'server:open_workspace':
+        if (msg.path) {
+          this.addLogLine(`[Open Workspace] Switching IDE workspace in same window: ${msg.path}`, 'info');
+          vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(msg.path), { forceNewWindow: false });
+        }
         break;
 
       case 'server:emergency_stop':

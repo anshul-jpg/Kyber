@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 
+// Protect daemon from breaking pipes (EPIPE) when IDE closes or restarts
+process.stdout.on('error', (err: any) => {
+  if (err.code === 'EPIPE') return;
+});
+process.stderr.on('error', (err: any) => {
+  if (err.code === 'EPIPE') return;
+});
+process.on('uncaughtException', (err: any) => {
+  if (err.code === 'EPIPE') return;
+  console.error('[Companion Daemon Error] Uncaught exception:', err);
+});
+
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -65,6 +77,7 @@ async function startCloudflareTunnel(port: number, token?: string): Promise<{ ur
         console.log('[Tunnel] Launching Cloudflare named tunnel with secure token...');
         proc = spawn(binPath, ['tunnel', 'run', '--token', token], {
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         });
         // Named tunnels route through user's preconfigured Cloudflare domain
         setTimeout(() => {
@@ -82,6 +95,7 @@ async function startCloudflareTunnel(port: number, token?: string): Promise<{ ur
         console.log('[Tunnel] Launching Cloudflare quick tunnel (worldwide HTTPS)...');
         proc = spawn(binPath, ['tunnel', '--url', `http://127.0.0.1:${port}`], {
           stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
         });
       }
 
