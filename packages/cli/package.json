@@ -9,7 +9,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/bin/agy-companion.ts",
-    "start": "node dist/bin/agy-companion.js"
+    "start": "node dist/bin/agy-companion.js",
+    "test": "tsc && node --test dist/hooks/ipc-server.test.js"
   },
   "dependencies": {
     "@agy-companion/protocol": "^0.1.0",

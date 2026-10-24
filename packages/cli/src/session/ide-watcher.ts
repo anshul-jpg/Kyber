@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import http from 'http';
 import { EventEmitter } from 'events';
-import { ChatMessage, AgentQuota, AudioAttachment } from '@agy-companion/protocol';
+import { ChatMessage, AgentQuota, AudioAttachment, TerminalEntry } from '@agy-companion/protocol';
 
 export class IdeTranscriptWatcher extends EventEmitter {
   private activeTranscriptPath: string | null = null;
@@ -13,6 +13,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
   private autoDiscoverTicks: number = 0;
   private watchTimer: NodeJS.Timeout | null = null;
   private messageHistory: ChatMessage[] = [];
+  private terminalHistory: TerminalEntry[] = [];
 
   constructor() {
     super();
@@ -26,6 +27,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
     this.remainderBuffer = '';
     this.lastThought = null;
     this.messageHistory = [];
+    this.terminalHistory = [];
     console.log(`[IdeWatcher] Now tracking IDE transcript: ${transcriptPath}`);
     this.readNewEntries();
     this.startWatching();
@@ -46,6 +48,19 @@ export class IdeTranscriptWatcher extends EventEmitter {
       } catch {}
     }
     return [...this.messageHistory];
+  }
+
+  public getTerminalHistory(): TerminalEntry[] {
+    return [...this.terminalHistory];
+  }
+
+  private recordTerminalEntry(entry: TerminalEntry): void {
+    if (!this.terminalHistory.some(t => t.id === entry.id)) {
+      this.terminalHistory.push(entry);
+      if (this.terminalHistory.length > 100) {
+        this.terminalHistory.shift();
+      }
+    }
   }
 
   public autoDiscoverActiveConversation(workspaceDir?: string): string | null {
@@ -107,9 +122,9 @@ export class IdeTranscriptWatcher extends EventEmitter {
     this.watchTimer = setInterval(() => {
       this.readNewEntries();
 
-      // Every 10 ticks (~2.5s), auto-discover if Antigravity started or switched conversation
+      // Every 30 ticks (~7.5s), auto-discover if Antigravity started or switched conversation
       this.autoDiscoverTicks++;
-      if (this.autoDiscoverTicks >= 10) {
+      if (this.autoDiscoverTicks >= 30) {
         this.autoDiscoverTicks = 0;
         this.autoDiscoverActiveConversation();
       }
@@ -249,6 +264,32 @@ export class IdeTranscriptWatcher extends EventEmitter {
         this.recordMessage(msg, emitLive);
       }
     }
+
+    // 3. Tool Result / Run Command Output in IDE
+    if (entry.type === 'RUN_COMMAND') {
+      const output = entry.content || '';
+      const exitCode = typeof entry.exit_code === 'number' ? entry.exit_code : 0;
+      let matchedCommand = '';
+      for (let i = this.messageHistory.length - 1; i >= 0; i--) {
+        const m = this.messageHistory[i];
+        if (m.role === 'tool' && m.toolCall?.name === 'run_command' && !m.toolResult) {
+          m.toolResult = output;
+          matchedCommand = m.toolCall.args?.CommandLine || '';
+          break;
+        }
+      }
+      const entryObj: TerminalEntry = {
+        id: `term_${entry.step_index || Date.now()}`,
+        command: matchedCommand,
+        output,
+        exitCode,
+        timestamp: entry.created_at ? new Date(entry.created_at).getTime() : Date.now(),
+      };
+      this.recordTerminalEntry(entryObj);
+      if (emitLive) {
+        this.emit('terminal_output', entryObj);
+      }
+    }
   }
 
   private getToolSummary(name: string, args: any): string {
@@ -304,19 +345,25 @@ export class IdeTranscriptWatcher extends EventEmitter {
           const stat = fs.statSync(transcriptPath);
           let title = `Session ${d.name.substring(0, 8)}`;
           try {
-            const content = fs.readFileSync(transcriptPath, 'utf8');
+            const fd = fs.openSync(transcriptPath, 'r');
+            const buf = Buffer.alloc(4096);
+            const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+            fs.closeSync(fd);
+            const content = buf.subarray(0, bytesRead).toString('utf8');
             const lines = content.split('\n', 15);
             for (const l of lines) {
               if (!l.trim()) continue;
-              const parsed = JSON.parse(l);
-              if (parsed.type === 'USER_INPUT' && parsed.content) {
-                const clean = parsed.content.replace(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/, '$1').trim();
-                const firstLine = clean.split('\n')[0].trim();
-                if (firstLine) {
-                  title = firstLine.length > 32 ? firstLine.substring(0, 32) + '...' : firstLine;
-                  break;
+              try {
+                const parsed = JSON.parse(l);
+                if (parsed.type === 'USER_INPUT' && parsed.content) {
+                  const clean = parsed.content.replace(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/, '$1').trim();
+                  const firstLine = clean.split('\n')[0].trim();
+                  if (firstLine) {
+                    title = firstLine.length > 32 ? firstLine.substring(0, 32) + '...' : firstLine;
+                    break;
+                  }
                 }
-              }
+              } catch {}
             }
           } catch {}
           return {

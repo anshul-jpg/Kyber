@@ -14,7 +14,7 @@
     "dev:cli": "npm run dev --workspace=@agy-companion/cli",
     "dev:web": "npm run dev --workspace=@agy-companion/web",
     "start": "npm run start --workspace=@agy-companion/cli",
-    "test": "npm test --workspace=@agy-companion/protocol"
+    "test": "npm test --workspace=@agy-companion/protocol && npm test --workspace=@agy-companion/cli"
   },
   "keywords": [
     "antigravity",

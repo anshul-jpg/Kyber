@@ -9,9 +9,15 @@ export class WorkspaceManager extends EventEmitter {
     super();
   }
 
+  private getNormalizedId(workspacePath: string): { id: string; resolvedPath: string } {
+    const resolvedPath = path.resolve(workspacePath);
+    const key = process.platform === 'win32' ? resolvedPath.toLowerCase() : resolvedPath;
+    const id = Buffer.from(key).toString('base64url');
+    return { id, resolvedPath };
+  }
+
   public registerWorkspace(workspacePath: string, name?: string): WorkspaceState {
-    const normalized = path.resolve(workspacePath);
-    const id = Buffer.from(normalized).toString('base64url');
+    const { id, resolvedPath } = this.getNormalizedId(workspacePath);
     const existing = this.workspaces.get(id);
 
     if (existing) {
@@ -21,8 +27,8 @@ export class WorkspaceManager extends EventEmitter {
 
     const state: WorkspaceState = {
       id,
-      name: name || path.basename(normalized) || 'root',
-      path: normalized,
+      name: name || path.basename(resolvedPath) || 'root',
+      path: resolvedPath,
       status: 'idle',
       lastActive: Date.now(),
       pendingApprovals: [],
@@ -38,8 +44,7 @@ export class WorkspaceManager extends EventEmitter {
   }
 
   public getWorkspaceByPath(workspacePath: string): WorkspaceState | undefined {
-    const normalized = path.resolve(workspacePath);
-    const id = Buffer.from(normalized).toString('base64url');
+    const { id } = this.getNormalizedId(workspacePath);
     return this.workspaces.get(id);
   }
 
@@ -86,6 +91,7 @@ export class WorkspaceManager extends EventEmitter {
   }
 
   public listWorkspaces(): WorkspaceState[] {
-    return Array.from(this.workspaces.values());
+    const list = Array.from(this.workspaces.values());
+    return list.sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
   }
 }

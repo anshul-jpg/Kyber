@@ -1,8 +1,9 @@
 import http from 'http';
 import { EventEmitter } from 'events';
-import { execSync } from 'child_process';
+import { execSync, execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { ApprovalRequest, ApprovalDecisionPayload, GitFileChange, HOOK_IPC_PORT } from '@agy-companion/protocol';
 
 interface PendingRequest {
@@ -40,38 +41,83 @@ function isPathIgnored(relPath: string, patterns: string[]): boolean {
   return false;
 }
 
-function getWorkspaceGitChanges(cwd: string): GitFileChange[] {
+interface GitCacheEntry {
+  changes: GitFileChange[];
+  time: number;
+  updating?: boolean;
+}
+
+const gitCache = new Map<string, GitCacheEntry>();
+
+function parseGitOutput(cwd: string, numstat: string, status: string): GitFileChange[] {
+  const ignorePatterns = loadCompanionIgnorePatterns(cwd);
+  const changes: GitFileChange[] = [];
+  const statusMap = new Map<string, string>();
+  for (const line of status.trim().split('\n')) {
+    if (!line) continue;
+    const s = line.substring(0, 2).trim();
+    const f = line.substring(3).trim();
+    statusMap.set(f, s);
+  }
+  for (const line of numstat.trim().split('\n')) {
+    if (!line) continue;
+    const parts = line.split('\t');
+    if (parts.length >= 3) {
+      const ins = parseInt(parts[0], 10) || 0;
+      const del = parseInt(parts[1], 10) || 0;
+      const file = parts[2].trim();
+      if (isPathIgnored(file, ignorePatterns)) continue;
+      changes.push({
+        file: path.basename(file),
+        relativePath: file,
+        insertions: ins,
+        deletions: del,
+        status: statusMap.get(file) || 'M',
+      });
+    }
+  }
+  return changes;
+}
+
+function refreshGitChangesAsync(normCwd: string): void {
+  execFile('git', ['diff', '--numstat'], { cwd: normCwd, encoding: 'utf8', timeout: 2500 }, (err1, numstat) => {
+    if (err1) return;
+    execFile('git', ['status', '--porcelain'], { cwd: normCwd, encoding: 'utf8', timeout: 2500 }, (err2, status) => {
+      if (err2) return;
+      try {
+        const changes = parseGitOutput(normCwd, numstat || '', status || '');
+        gitCache.set(normCwd, { changes, time: Date.now(), updating: false });
+      } catch {}
+    });
+  });
+}
+
+export function getWorkspaceGitChanges(cwd: string): GitFileChange[] {
+  const normCwd = path.resolve(cwd);
+  const now = Date.now();
+  const cached = gitCache.get(normCwd);
+
+  if (cached) {
+    if (now - cached.time < 3000) {
+      return cached.changes;
+    }
+    // Stale: trigger background async refresh without blocking event loop
+    if (!cached.updating) {
+      cached.updating = true;
+      refreshGitChangesAsync(normCwd);
+    }
+    return cached.changes;
+  }
+
+  // First time for this cwd: sync fallback with 1500ms timeout
   try {
-    const ignorePatterns = loadCompanionIgnorePatterns(cwd);
-    const numstat = execSync('git diff --numstat', { cwd, encoding: 'utf8', timeout: 2500 });
-    const status = execSync('git status --porcelain', { cwd, encoding: 'utf8', timeout: 2500 });
-    const changes: GitFileChange[] = [];
-    const statusMap = new Map<string, string>();
-    for (const line of status.trim().split('\n')) {
-      if (!line) continue;
-      const s = line.substring(0, 2).trim();
-      const f = line.substring(3).trim();
-      statusMap.set(f, s);
-    }
-    for (const line of numstat.trim().split('\n')) {
-      if (!line) continue;
-      const parts = line.split('\t');
-      if (parts.length >= 3) {
-        const ins = parseInt(parts[0], 10) || 0;
-        const del = parseInt(parts[1], 10) || 0;
-        const file = parts[2].trim();
-        if (isPathIgnored(file, ignorePatterns)) continue;
-        changes.push({
-          file: path.basename(file),
-          relativePath: file,
-          insertions: ins,
-          deletions: del,
-          status: statusMap.get(file) || 'M',
-        });
-      }
-    }
+    const numstat = execSync('git diff --numstat', { cwd: normCwd, encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    const status = execSync('git status --porcelain', { cwd: normCwd, encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+    const changes = parseGitOutput(normCwd, numstat, status);
+    gitCache.set(normCwd, { changes, time: now, updating: false });
     return changes;
   } catch {
+    gitCache.set(normCwd, { changes: [], time: now, updating: false });
     return [];
   }
 }
@@ -79,6 +125,7 @@ function getWorkspaceGitChanges(cwd: string): GitFileChange[] {
 export class HookIpcServer extends EventEmitter {
   private server: http.Server | null = null;
   private pendingRequests: Map<string, PendingRequest> = new Map();
+  private pausedRequests: Map<string, ApprovalRequest> = new Map();
   private resolvedHistory: Map<string, { decision: string; timestamp: number }> = new Map();
 
   constructor(private port: number = HOOK_IPC_PORT) {
@@ -136,11 +183,80 @@ export class HookIpcServer extends EventEmitter {
     } else if (toolCall.name === 'replace_file_content' || toolCall.name === 'multi_replace_file_content') {
       const target = toolCall.args?.TargetFile ? path.basename(toolCall.args.TargetFile) : 'file';
       toolTitle = `Edit File: ${target}${toolAction ? ` (${toolAction})` : ''}`;
+    } else if (toolCall.name === 'ask_question') {
+      const q = toolCall.args?.questions?.[0]?.question || toolAction || 'Question from Agent';
+      toolTitle = q;
     } else if (toolAction) {
       toolTitle = `Allow ${toolAction}?`;
     }
 
     const gitChanges = getWorkspaceGitChanges(wsPath);
+
+    let gitDiff: string | undefined;
+    if (toolCall.name === 'replace_file_content' && toolCall.args?.TargetContent !== undefined && toolCall.args?.ReplacementContent !== undefined) {
+      const targetLines = String(toolCall.args.TargetContent).split('\n');
+      const replacementLines = String(toolCall.args.ReplacementContent).split('\n');
+      const targetName = toolCall.args.TargetFile ? path.basename(toolCall.args.TargetFile) : 'file';
+      const startLine = Number(toolCall.args.StartLine) || 1;
+      gitDiff = [
+        `--- a/${targetName}`,
+        `+++ b/${targetName}`,
+        `@@ -${startLine},${targetLines.length} +${startLine},${replacementLines.length} @@`,
+        ...targetLines.map((l: string) => `-${l}`),
+        ...replacementLines.map((l: string) => `+${l}`),
+      ].join('\n');
+    } else if (toolCall.name === 'multi_replace_file_content' && Array.isArray(toolCall.args?.ReplacementChunks)) {
+      const targetName = toolCall.args.TargetFile ? path.basename(toolCall.args.TargetFile) : 'file';
+      const diffChunks: string[] = [`--- a/${targetName}`, `+++ b/${targetName}`];
+      for (const chunk of toolCall.args.ReplacementChunks) {
+        const targetLines = String(chunk.TargetContent || '').split('\n');
+        const repLines = String(chunk.ReplacementContent || '').split('\n');
+        const startLine = Number(chunk.StartLine) || 1;
+        diffChunks.push(`@@ -${startLine},${targetLines.length} +${startLine},${repLines.length} @@`);
+        targetLines.forEach(l => diffChunks.push(`-${l}`));
+        repLines.forEach(l => diffChunks.push(`+${l}`));
+      }
+      gitDiff = diffChunks.join('\n');
+    } else if (toolCall.name === 'write_to_file' && toolCall.args?.CodeContent !== undefined) {
+      const targetFile = toolCall.args.TargetFile ? path.resolve(toolCall.args.TargetFile) : '';
+      const targetName = targetFile ? path.basename(targetFile) : 'file';
+      const newLines = String(toolCall.args.CodeContent).split('\n');
+
+      if (targetFile && fs.existsSync(targetFile)) {
+        try {
+          const oldContent = fs.readFileSync(targetFile, 'utf8');
+          const oldLines = oldContent.split('\n');
+          gitDiff = [
+            `--- a/${targetName}`,
+            `+++ b/${targetName}`,
+            `@@ -1,${oldLines.length} +1,${newLines.length} @@`,
+            ...oldLines.map((l: string) => `-${l}`),
+            ...newLines.map((l: string) => `+${l}`),
+          ].join('\n');
+        } catch {
+          gitDiff = [
+            `--- /dev/null`,
+            `+++ b/${targetName}`,
+            `@@ -0,0 +1,${newLines.length} @@`,
+            ...newLines.map((l: string) => `+${l}`),
+          ].join('\n');
+        }
+      } else {
+        gitDiff = [
+          `--- /dev/null`,
+          `+++ b/${targetName}`,
+          `@@ -0,0 +1,${newLines.length} @@`,
+          ...newLines.map((l: string) => `+${l}`),
+        ].join('\n');
+      }
+    } else if (gitChanges.length > 0 && !gitDiff) {
+      try {
+        const fullDiff = execSync('git diff -U3', { cwd: wsPath, encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+        if (fullDiff && fullDiff.trim()) {
+          gitDiff = fullDiff.trim();
+        }
+      } catch {}
+    }
 
     const request: ApprovalRequest = {
       id: requestId,
@@ -150,6 +266,7 @@ export class HookIpcServer extends EventEmitter {
       toolCall,
       toolTitle,
       gitChanges,
+      gitDiff,
       timestamp: Date.now(),
       timeoutSeconds,
     };
@@ -157,11 +274,16 @@ export class HookIpcServer extends EventEmitter {
     const timer = setTimeout(() => {
       if (this.pendingRequests.has(requestId)) {
         this.pendingRequests.delete(requestId);
-        this.resolvedHistory.set(requestId, { decision: 'ask', timestamp: Date.now() });
-        this.emit('approval_timeout', request);
-        this.emit('approval_resolved', { requestId, decision: 'ask', reason: 'Mobile approval timed out (120s). Desktop fallback.' });
+
+        const pausedReq: ApprovalRequest = { ...request, isPaused: true };
+        this.pausedRequests.set(requestId, pausedReq);
+        this.resolvedHistory.set(requestId, { decision: 'deny', timestamp: Date.now() });
+        this.emit('approval_paused', pausedReq);
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ decision: 'ask', reason: 'Mobile approval timed out (120s). Desktop fallback.' }));
+        res.end(JSON.stringify({
+          decision: 'deny',
+          reason: 'Execution Paused: Waiting for mobile companion approval. Session frozen safely without desktop prompt.'
+        }));
       }
     }, timeoutSeconds * 1000);
 
@@ -189,31 +311,41 @@ export class HookIpcServer extends EventEmitter {
 
   public resolveApproval(payload: ApprovalDecisionPayload): boolean {
     const pending = this.pendingRequests.get(payload.requestId);
-    if (pending) {
-      if (payload.decision === 'allow') {
-        const cmd = pending.request.toolCall?.args?.CommandLine;
-        const overrides = cmd ? [`command(${cmd})`] : undefined;
-        pending.resolve({
-          decision: 'allow',
-          ...(overrides ? { permissionOverrides: overrides } : {}),
-        });
-      } else if (payload.decision === 'deny') {
-        pending.resolve({
-          decision: 'deny',
-          reason: payload.reason || payload.interceptPrompt || 'Denied remotely via companion app',
-        });
-      } else if (payload.decision === 'intercept') {
-        pending.resolve({
-          decision: 'deny',
-          reason: `User redirected agent: ${payload.interceptPrompt || 'Execution halted'}`,
-        });
-      }
+    if (!pending) {
+      return false;
     }
-
+    clearTimeout(pending.timer);
+    if (payload.decision === 'allow') {
+      const cmd = pending.request.toolCall?.args?.CommandLine;
+      const overrides = cmd ? [`command(${cmd})`] : undefined;
+      pending.resolve({
+        decision: 'allow',
+        ...(overrides ? { permissionOverrides: overrides } : {}),
+      });
+    } else if (payload.decision === 'deny') {
+      pending.resolve({
+        decision: 'deny',
+        reason: payload.reason || payload.interceptPrompt || 'Denied remotely via companion app',
+      });
+    } else if (payload.decision === 'intercept') {
+      pending.resolve({
+        decision: 'deny',
+        reason: `User redirected agent: ${payload.interceptPrompt || 'Execution halted'}`,
+      });
+    }
     this.pendingRequests.delete(payload.requestId);
+    this.pausedRequests.delete(payload.requestId);
     this.resolvedHistory.set(payload.requestId, { decision: payload.decision, timestamp: Date.now() });
     this.emit('approval_resolved', payload);
     return true;
+  }
+
+  public getPausedRequest(requestId: string): ApprovalRequest | undefined {
+    return this.pausedRequests.get(requestId);
+  }
+
+  public clearPausedRequest(requestId: string): void {
+    this.pausedRequests.delete(requestId);
   }
 
   public clearAllApprovals(reason: string = 'Cleared by user'): void {
@@ -243,7 +375,9 @@ export class HookIpcServer extends EventEmitter {
   }
 
   public getPendingRequests(): ApprovalRequest[] {
-    return Array.from(this.pendingRequests.values()).map(p => p.request);
+    const active = Array.from(this.pendingRequests.values()).map(p => p.request);
+    const paused = Array.from(this.pausedRequests.values());
+    return [...active, ...paused];
   }
 
   public stop(): Promise<void> {

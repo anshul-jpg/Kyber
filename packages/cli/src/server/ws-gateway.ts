@@ -2,6 +2,8 @@ import http from 'http';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import crypto from 'crypto';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
 import {
@@ -14,10 +16,17 @@ import {
   ExecutionPolicy,
   CompanionMode,
   AudioAttachment,
+  EditorTab,
+  decodePairingTicket,
+  RecentProject,
+  TerminalEntry,
+  HostTelemetry,
 } from '@agy-companion/protocol';
-import { HookIpcServer } from '../hooks/ipc-server.js';
+import { HookIpcServer, getWorkspaceGitChanges } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
 import { IdeTranscriptWatcher } from '../session/ide-watcher.js';
+import { getRecentProjects, launchRecentProject } from '../session/recent-projects.js';
+import { closeProvider, restartProvider, getHostTelemetry } from '../provider/provider-lifecycle.js';
 import { killStalePort } from './port-cleaner.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,6 +39,7 @@ export class WsGateway {
   private wss: WebSocketServer | null = null;
   private clients: Set<WebSocket> = new Set();
   private phoneClients: Set<WebSocket> = new Set();
+  private lastPhoneActivity: number = Date.now();
   private extensionClients: Set<WebSocket> = new Set();
   private extensionWorkspaces: Map<WebSocket, string> = new Map();
   private ideWatcher: IdeTranscriptWatcher;
@@ -38,7 +48,59 @@ export class WsGateway {
     workspaceId: string;
     images: { base64: string; name: string }[];
     audio?: AudioAttachment;
+    model?: string;
   }> = [];
+  private activeTabs: EditorTab[] = [];
+
+  public getActiveTabs(workspaceId?: string): EditorTab[] {
+    if (this.activeTabs.length > 0) {
+      return this.activeTabs;
+    }
+    try {
+      const ws = (workspaceId ? this.workspaceManager.getWorkspace(workspaceId) : null) || this.workspaceManager.listWorkspaces()[0];
+      const cwd = ws?.path || process.cwd();
+      const changes = getWorkspaceGitChanges(cwd);
+      if (changes.length > 0) {
+        return changes.slice(0, 10).map((c, idx) => ({
+          label: c.file,
+          path: c.relativePath,
+          isActive: idx === 0,
+          isDirty: true,
+        }));
+      }
+      const dirents = fs.readdirSync(cwd, { withFileTypes: true });
+      const ignored = new Set(['.git', 'node_modules', 'dist', '.tempmediaStorage', '.gemini', 'coverage', '.idea', '.vscode']);
+      const files = dirents
+        .filter(d => !d.isDirectory() && !ignored.has(d.name) && !d.name.startsWith('.'))
+        .slice(0, 8);
+      if (files.length > 0) {
+        return files.map((f, idx) => ({
+          label: f.name,
+          path: f.name,
+          isActive: idx === 0,
+          isDirty: false,
+        }));
+      }
+    } catch {}
+    return [];
+  }
+
+  private resolveWorkspace(workspaceId?: string | null): WorkspaceState {
+    if (workspaceId) {
+      const match = this.workspaceManager.getWorkspace(workspaceId);
+      if (match) return match;
+    }
+    const list = this.workspaceManager.listWorkspaces();
+    if (list.length > 0) return list[0];
+    return {
+      id: 'default',
+      name: path.basename(process.cwd()),
+      path: process.cwd(),
+      status: 'idle',
+      lastActive: Date.now(),
+      pendingApprovals: [],
+    };
+  }
 
   public isIdeActive(): boolean {
     return Array.from(this.extensionClients).some(c => c.readyState === WebSocket.OPEN);
@@ -63,6 +125,16 @@ export class WsGateway {
     this.ideWatcher = new IdeTranscriptWatcher();
     this.setupHookListeners();
     this.setupIdeWatcher();
+
+    // Periodic Host Telemetry broadcast (every 6s when phone clients connected)
+    setInterval(() => {
+      if (this.phoneClients.size > 0) {
+        this.broadcast({
+          type: 'server:host_telemetry',
+          telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant'),
+        });
+      }
+    }, 6000);
   }
 
   private getGlobalModeFilePath(): string {
@@ -97,6 +169,12 @@ export class WsGateway {
       const globalPath = this.getGlobalModeFilePath();
       fs.writeFileSync(globalPath, mode, 'utf8');
 
+      // Record target device if remote or desk
+      if (mode === 'remote' || mode === 'desk') {
+        const targetPath = path.resolve(os.homedir(), '.agy-companion-target');
+        try { fs.writeFileSync(targetPath, mode, 'utf8'); } catch {}
+      }
+
       // Also sync to workspace .agents/companion-mode if directory exists
       const cwdPath = path.resolve(process.cwd(), '.agents/companion-mode');
       if (fs.existsSync(path.dirname(cwdPath))) {
@@ -125,6 +203,67 @@ export class WsGateway {
 
   private getGlobalPolicyFilePath(): string {
     return path.resolve(os.homedir(), '.agy-companion-policy');
+  }
+
+  public getAuthToken(): string {
+    const tokenPath = path.resolve(os.homedir(), '.agy-companion-token');
+    try {
+      if (fs.existsSync(tokenPath)) {
+        const token = fs.readFileSync(tokenPath, 'utf8').trim();
+        if (token.length >= 16) return token;
+      }
+    } catch {}
+    // Generate secure token on first run if none exists (finding 3)
+    const newToken = crypto.randomBytes(24).toString('hex');
+    try {
+      fs.writeFileSync(tokenPath, newToken, 'utf8');
+      console.log(`[WsGateway] Generated secure pairing token at ${tokenPath}`);
+    } catch (err) {
+      console.error('[WsGateway] Failed to save pairing token to disk:', err);
+    }
+    return newToken;
+  }
+
+  public isRequestAuthorized(req: http.IncomingMessage, parsedUrl: URL): boolean {
+    const rawIp = req.socket.remoteAddress || '';
+    const cleanIp = rawIp.replace(/^::ffff:/, '');
+    const isLocal = cleanIp === '127.0.0.1' || cleanIp === '::1' || cleanIp === 'localhost';
+    if (isLocal) return true;
+
+    const expectedToken = this.getAuthToken();
+    if (!expectedToken) return false;
+
+    // Timing-safe comparison helper (finding 2)
+    const safeCompare = (a: string, b: string): boolean => {
+      if (typeof a !== 'string' || typeof b !== 'string') return false;
+      const bufA = Buffer.from(a);
+      const bufB = Buffer.from(b);
+      if (bufA.length !== bufB.length) return false;
+      return crypto.timingSafeEqual(bufA, bufB);
+    };
+
+    const authHeader = req.headers['authorization'];
+    if (authHeader) {
+      const parts = authHeader.split(' ');
+      if (parts.length === 2 && parts[0].toLowerCase() === 'bearer' && safeCompare(parts[1].trim(), expectedToken)) {
+        return true;
+      }
+    }
+
+    const qToken = parsedUrl.searchParams.get('token');
+    if (qToken && safeCompare(qToken.trim(), expectedToken)) {
+      return true;
+    }
+
+    const qTicket = parsedUrl.searchParams.get('ticket');
+    if (qTicket) {
+      const decoded = decodePairingTicket(qTicket);
+      if (decoded && safeCompare(decoded.token, expectedToken)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   public getExecutionPolicy(): ExecutionPolicy {
@@ -176,6 +315,13 @@ export class WsGateway {
       });
     });
 
+    this.ideWatcher.on('terminal_output', (entry: TerminalEntry) => {
+      this.broadcast({
+        type: 'server:terminal_output',
+        entry,
+      });
+    });
+
     this.ideWatcher.on('conversation_switched', data => {
       const activeWs = this.workspaceManager.listWorkspaces()[0];
       const wsId = activeWs ? activeWs.id : 'default';
@@ -206,6 +352,14 @@ export class WsGateway {
         type: 'server:approval_resolved',
         requestId: payload.requestId,
         decision: payload.decision,
+      });
+    });
+
+    this.hookIpc.on('approval_paused', (request: ApprovalRequest) => {
+      this.workspaceManager.addPendingApproval(request);
+      this.broadcast({
+        type: 'server:approval_paused',
+        request,
       });
     });
 
@@ -263,10 +417,9 @@ export class WsGateway {
   public start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.httpServer = http.createServer((req, res) => {
-        // Simple HTTP CORS & Health check
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
         if (req.method === 'OPTIONS') {
           res.writeHead(204);
@@ -275,6 +428,23 @@ export class WsGateway {
         }
 
         const url = req.url || '/';
+        const parsedUrl = new URL(url, 'http://localhost');
+
+        // Allow public/benign endpoints without pairing token
+        const isPublicEndpoint =
+          url === '/health' ||
+          url === '/api/health' ||
+          url === '/api/apk-status' ||
+          url === '/api/version' ||
+          url === '/download/app.apk' ||
+          url === '/app.apk' ||
+          !url.startsWith('/api/');
+
+        if (!isPublicEndpoint && !this.isRequestAuthorized(req, parsedUrl)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Unauthorized: Valid pairing token required' }));
+          return;
+        }
 
         if (url === '/health' || url === '/api/health') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -285,6 +455,7 @@ export class WsGateway {
               workspacesCount: this.workspaceManager.listWorkspaces().length,
               pendingApprovals: this.hookIpc.getPendingRequests().length,
               connectedPhoneCount: this.phoneClients.size,
+              lastPhoneActivity: this.lastPhoneActivity,
               mode: this.getMode(),
             })
           );
@@ -293,7 +464,7 @@ export class WsGateway {
 
         if (url === '/api/mode' && req.method === 'GET') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ mode: this.getMode(), connectedPhoneCount: this.phoneClients.size }));
+          res.end(JSON.stringify({ mode: this.getMode(), connectedPhoneCount: this.phoneClients.size, lastPhoneActivity: this.lastPhoneActivity }));
           return;
         }
 
@@ -362,17 +533,12 @@ export class WsGateway {
         if (url.startsWith('/api/workspace/files') || url.startsWith('/api/files')) {
           try {
             const parsed = new URL(url, 'http://localhost');
-            const wsId = parsed.searchParams.get('workspaceId') || this.workspaceManager.listWorkspaces()[0]?.id;
-            const targetWs = wsId ? this.workspaceManager.getWorkspace(wsId) : null;
-            if (!targetWs) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Workspace not found' }));
-              return;
-            }
+            const targetWs = this.resolveWorkspace(parsed.searchParams.get('workspaceId'));
             const rootPath = path.resolve(targetWs.path);
             const relSub = (parsed.searchParams.get('subPath') || '').replace(/^(\/|\\)+/, '');
             const targetPath = path.resolve(rootPath, relSub);
-            if (!targetPath.startsWith(rootPath) || !fs.existsSync(targetPath)) {
+            const relFromRoot = path.relative(rootPath, targetPath);
+            if (relFromRoot.startsWith('..') || path.isAbsolute(relFromRoot) || !fs.existsSync(targetPath)) {
               res.writeHead(404, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Directory not found or invalid' }));
               return;
@@ -404,21 +570,29 @@ export class WsGateway {
         if (url.startsWith('/api/workspace/file/content') || url.startsWith('/api/file/content')) {
           try {
             const parsed = new URL(url, 'http://localhost');
-            const wsId = parsed.searchParams.get('workspaceId') || this.workspaceManager.listWorkspaces()[0]?.id;
-            const targetWs = wsId ? this.workspaceManager.getWorkspace(wsId) : null;
-            if (!targetWs) {
-              res.writeHead(404, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Workspace not found' }));
-              return;
-            }
+            const targetWs = this.resolveWorkspace(parsed.searchParams.get('workspaceId'));
             const rootPath = path.resolve(targetWs.path);
-            const relFile = (parsed.searchParams.get('filePath') || parsed.searchParams.get('path') || '').replace(/^(\/|\\)+/, '');
-            const targetPath = path.resolve(rootPath, relFile);
-            if (!targetPath.startsWith(rootPath) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
+            const rawFile = (parsed.searchParams.get('filePath') || parsed.searchParams.get('path') || '').trim();
+            let targetPath = '';
+            if (path.isAbsolute(rawFile)) {
+              targetPath = path.resolve(rawFile);
+            } else {
+              targetPath = path.resolve(rootPath, rawFile.replace(/^(\/|\\)+/, ''));
+            }
+            const allWorkspaces = this.workspaceManager.listWorkspaces();
+            const isInsideAnyWs = allWorkspaces.some(ws => {
+              const wsRoot = path.resolve(ws.path);
+              const rel = path.relative(wsRoot, targetPath);
+              return !rel.startsWith('..') && !path.isAbsolute(rel);
+            });
+            const isInsideRoot = !path.relative(rootPath, targetPath).startsWith('..');
+
+            if ((!isInsideAnyWs && !isInsideRoot) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
               res.writeHead(404, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'File not found or invalid' }));
               return;
             }
+            const relFile = path.relative(rootPath, targetPath).replace(/\\/g, '/');
             const stat = fs.statSync(targetPath);
             const ext = path.extname(targetPath).toLowerCase();
             const isImage = ['.png', '.jpg', '.jpeg', '.webp', '.svg', '.gif'].includes(ext);
@@ -523,6 +697,234 @@ export class WsGateway {
           return;
         }
 
+        // Live Workspace Git Status
+        if (url.startsWith('/api/workspace/git/status') || url.startsWith('/api/git/status')) {
+          try {
+            const parsed = new URL(url, 'http://localhost');
+            const targetWs = this.resolveWorkspace(parsed.searchParams.get('workspaceId'));
+            const cwd = targetWs.path;
+            const changes = getWorkspaceGitChanges(cwd);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, workspacePath: cwd, changes }));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        // Live Workspace Unified Git Diff Inspector
+        if (url.startsWith('/api/workspace/git/diff') || url.startsWith('/api/git/diff')) {
+          try {
+            const parsed = new URL(url, 'http://localhost');
+            const targetWs = this.resolveWorkspace(parsed.searchParams.get('workspaceId'));
+            const cwd = targetWs.path;
+            const rawFile = (parsed.searchParams.get('filePath') || parsed.searchParams.get('path') || parsed.searchParams.get('file') || '').trim();
+            let safeRel = '';
+            if (path.isAbsolute(rawFile)) {
+              safeRel = path.relative(cwd, rawFile).replace(/\\/g, '/');
+            } else {
+              safeRel = rawFile.replace(/^(\/|\\)+/, '').replace(/\\/g, '/');
+            }
+
+            let diff = '';
+            try {
+              if (safeRel) {
+                try {
+                  diff = execSync(`git diff HEAD -U3 -- "${safeRel}"`, { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                } catch {
+                  diff = execSync(`git diff -U3 -- "${safeRel}"`, { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                }
+                if (!diff.trim()) {
+                  const full = path.resolve(cwd, safeRel);
+                  if (fs.existsSync(full) && !fs.statSync(full).isDirectory()) {
+                    const content = fs.readFileSync(full, 'utf8');
+                    const lines = content.split('\n');
+                    diff = [
+                      `--- /dev/null`,
+                      `+++ b/${safeRel}`,
+                      `@@ -0,0 +1,${lines.length} @@`,
+                      ...lines.map(l => `+${l}`),
+                    ].join('\n');
+                  }
+                }
+              } else {
+                try {
+                  diff = execSync('git diff HEAD -U3', { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                } catch {
+                  diff = execSync('git diff -U3', { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+                }
+              }
+            } catch (err: any) {
+              diff = `Failed to get diff: ${err.message}`;
+            }
+
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, filePath: safeRel || null, diff }));
+          } catch (err: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          }
+          return;
+        }
+
+        // Live Workspace Active Editor Tabs
+        if (url.startsWith('/api/workspace/tabs') || url.startsWith('/api/tabs')) {
+          if (req.method === 'POST') {
+            let body = '';
+            req.on('data', chunk => { body += chunk; });
+            req.on('end', () => {
+              try {
+                const data = JSON.parse(body);
+                if (Array.isArray(data.tabs)) {
+                  this.activeTabs = data.tabs;
+                  this.broadcast({
+                    type: 'server:tabs_updated',
+                    tabs: this.activeTabs,
+                    workspaceId: data.workspaceId,
+                  });
+                }
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: true, count: this.activeTabs.length }));
+              } catch (e: any) {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: e.message }));
+              }
+            });
+            return;
+          }
+          const parsed = new URL(url, 'http://localhost');
+          const targetWs = this.resolveWorkspace(parsed.searchParams.get('workspaceId'));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, tabs: this.getActiveTabs(targetWs.id) }));
+          return;
+        }
+
+        // Live Terminal Logs History
+        if (url === '/api/terminal/history' || url.startsWith('/api/terminal/history')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, entries: this.ideWatcher.getTerminalHistory() }));
+          return;
+        }
+
+        // Recent Projects Hub API
+        if (url === '/api/workspace/recent' || url.startsWith('/api/workspace/recent')) {
+          const projects = getRecentProjects(this.workspaceManager.listWorkspaces());
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, projects }));
+          return;
+        }
+
+        // Launch Project in IDE
+        if ((url === '/api/workspace/launch' || url === '/api/workspace/open') && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', async () => {
+            try {
+              const data = JSON.parse(body);
+              if (data.path) {
+                const isAlive = this.isIdeActive();
+                const forwardCb = isAlive ? (p: string) => {
+                  let sent = false;
+                  for (const extWs of this.extensionClients) {
+                    if (extWs.readyState === WebSocket.OPEN) {
+                      extWs.send(JSON.stringify({ type: 'server:open_workspace', path: p }));
+                      sent = true;
+                    }
+                  }
+                  return sent;
+                } : undefined;
+                const result = await launchRecentProject(data.path, forwardCb);
+                this.broadcast({
+                  type: 'server:recent_projects_updated',
+                  projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+                });
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(result));
+              } else {
+                res.writeHead(400, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Missing project path' }));
+              }
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+
+        // Host Hardware Telemetry API
+        if (url === '/api/host/telemetry' && req.method === 'GET') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant') }));
+          return;
+        }
+
+        // Close IDE / Provider Process API
+        if (url === '/api/host/close-ide' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', () => {
+            try {
+              const data = body ? JSON.parse(body) : {};
+              const result = closeProvider(data.providerId || 'antigravity');
+              this.broadcast({ type: 'server:ide_status', status: 'dormant' });
+              this.broadcast({ type: 'server:host_telemetry', telemetry: getHostTelemetry('dormant', data.providerId || 'antigravity') });
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+
+        // Restart IDE / Provider Process API
+        if (url === '/api/host/restart-ide' && req.method === 'POST') {
+          let body = '';
+          req.on('data', chunk => { body += chunk; });
+          req.on('end', async () => {
+            try {
+              const data = body ? JSON.parse(body) : {};
+              const targetPath = this.resolveTargetWorkspace(data.path || data.workspacePath);
+              this.extensionClients.clear();
+              this.extensionWorkspaces.clear();
+              this.broadcast({ type: 'server:ide_status', status: 'dormant' });
+              const activeWs = this.workspaceManager.listWorkspaces()[0];
+              this.broadcast({
+                type: 'server:chat_message',
+                workspaceId: activeWs?.id || 'default',
+                message: {
+                  id: `restart_ide_${Date.now()}`,
+                  role: 'system',
+                  content: `**Host IDE Restarting:** Executing detached batch restart script for Antigravity IDE...`,
+                  timestamp: Date.now(),
+                },
+              });
+              const result = await restartProvider(data.providerId || 'antigravity', targetPath);
+              this.broadcast({
+                type: 'server:ide_status',
+                status: result.ok ? 'active' : 'dormant',
+              });
+              this.broadcast({
+                type: 'server:host_telemetry',
+                telemetry: getHostTelemetry(result.ok ? 'active' : 'dormant', data.providerId || 'antigravity'),
+              });
+              this.broadcast({
+                type: 'server:recent_projects_updated',
+                projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+              });
+              res.writeHead(200, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify(result));
+            } catch (err: any) {
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: err.message }));
+            }
+          });
+          return;
+        }
+
         // Direct HTTP fallback for mobile approvals (notifications / background tasks)
         if ((url === '/api/hook/approval' || url === '/api/approval') && req.method === 'POST') {
           let body = '';
@@ -533,6 +935,29 @@ export class WsGateway {
             try {
               const payload = JSON.parse(body);
               if (payload && payload.requestId && payload.decision) {
+                const pausedReq = this.hookIpc.getPausedRequest(payload.requestId);
+                if (pausedReq) {
+                  this.hookIpc.clearPausedRequest(payload.requestId);
+                  this.workspaceManager.removePendingApproval(payload.requestId);
+                  this.broadcast({
+                    type: 'server:approval_resolved',
+                    requestId: payload.requestId,
+                    decision: payload.decision,
+                  });
+                  if (payload.decision === 'allow') {
+                    const targetTool = pausedReq.toolTitle || pausedReq.toolCall?.name || 'action';
+                    this.handleSendPrompt(`[Approved via Mobile]: Proceed with ${targetTool}`, pausedReq.workspacePath);
+                  } else {
+                    const answerPrompt = payload.interceptPrompt || payload.reason;
+                    if (answerPrompt) {
+                      this.handleSendPrompt(answerPrompt, pausedReq.workspacePath);
+                    }
+                  }
+                  res.writeHead(200, { 'Content-Type': 'application/json' });
+                  res.end(JSON.stringify({ ok: true, resumed: true }));
+                  return;
+                }
+
                 const ok = this.hookIpc.resolveApproval(payload);
                 this.workspaceManager.removePendingApproval(payload.requestId);
                 this.broadcast({
@@ -580,7 +1005,7 @@ export class WsGateway {
             try {
               const data = JSON.parse(body);
               if (data && (data.prompt || data.audio || (data.images && data.images.length > 0))) {
-                const ok = this.handleSendPrompt(data.prompt || '', data.workspaceId, data.images, data.audio);
+                const ok = this.handleSendPrompt(data.prompt || '', data.workspaceId, data.images, data.audio, data.model);
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ ok }));
               } else {
@@ -665,10 +1090,32 @@ export class WsGateway {
         res.end();
       });
 
-      this.wss = new WebSocketServer({ server: this.httpServer });
+      this.wss = new WebSocketServer({
+        server: this.httpServer,
+        verifyClient: (info, callback) => {
+          try {
+            const parsedUrl = new URL(info.req.url || '/', 'http://localhost');
+            const isAuth = this.isRequestAuthorized(info.req, parsedUrl);
+            if (isAuth) {
+              callback(true);
+            } else {
+              console.warn(`[WsGateway] 401 Unauthorized: Rejected unauthenticated WebSocket upgrade from ${info.req.socket.remoteAddress}`);
+              callback(false, 401, 'Unauthorized: Valid pairing token required');
+            }
+          } catch {
+            callback(false, 400, 'Bad Request');
+          }
+        },
+      });
 
-      this.wss.on('connection', (ws: WebSocket) => {
+      this.wss.on('connection', (ws: WebSocket, req: http.IncomingMessage) => {
         this.clients.add(ws);
+        const rawIp = req?.socket?.remoteAddress || '';
+        const clientIp = rawIp.replace(/^::ffff:/, '');
+        const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost';
+        if (clientIp) {
+          (ws as any)._clientIp = clientIp;
+        }
 
         const interfaces = os.networkInterfaces();
         let tailscaleIp: string | null = null;
@@ -708,6 +1155,11 @@ export class WsGateway {
           ideStatus: this.isIdeActive() ? 'active' : 'dormant',
           apkBuildTime: apkDetails.apkBuildTime,
           agentQuotas: this.ideWatcher.getAgentQuotas(),
+          activeTabs: this.getActiveTabs(),
+          token: isLocal ? (this.getAuthToken() || undefined) : undefined,
+          recentProjects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+          terminalHistory: this.ideWatcher.getTerminalHistory(),
+          telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant'),
         };
         ws.send(JSON.stringify(helloMsg));
 
@@ -762,6 +1214,9 @@ export class WsGateway {
   }
 
   private handleClientMessage(ws: WebSocket, msg: WsClientMessage): void {
+    if (this.phoneClients.has(ws)) {
+      this.lastPhoneActivity = Date.now();
+    }
     switch (msg.type) {
       case 'client:hello':
         if (msg.deviceId === 'vscode_extension_host' || msg.deviceId?.startsWith('vscode_extension')) {
@@ -778,25 +1233,46 @@ export class WsGateway {
             status: 'active',
           });
 
-          // Drain any pending prompts buffered while dormant
+          // Drain any pending prompts buffered while dormant with stagger
           if (this.pendingHostPrompts.length > 0) {
-            const queueToDrain = [...this.pendingHostPrompts];
-            this.pendingHostPrompts = [];
-            console.log(`[WsGateway] Draining ${queueToDrain.length} buffered prompt(s) to newly attached Extension Host.`);
-            for (const item of queueToDrain) {
-              ws.send(
-                JSON.stringify({
-                  type: 'server:forward_prompt',
-                  prompt: item.prompt,
-                  workspaceId: item.workspaceId,
-                  images: item.images,
-                  audio: item.audio,
-                })
-              );
+            const attachedWsPath = msg.workspacePath ? path.resolve(msg.workspacePath) : null;
+            const attachedWs = attachedWsPath ? this.workspaceManager.getWorkspaceByPath(attachedWsPath) : null;
+
+            const queueToDrain: typeof this.pendingHostPrompts = [];
+            const remaining: typeof this.pendingHostPrompts = [];
+
+            for (const item of this.pendingHostPrompts) {
+              if (!attachedWs || !item.workspaceId || item.workspaceId === attachedWs.id) {
+                queueToDrain.push(item);
+              } else {
+                remaining.push(item);
+              }
+            }
+            this.pendingHostPrompts = remaining;
+
+            if (queueToDrain.length > 0) {
+              console.log(`[WsGateway] Draining ${queueToDrain.length} buffered prompt(s) to newly attached Extension Host.`);
+              queueToDrain.forEach((item, idx) => {
+                setTimeout(() => {
+                  if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(
+                      JSON.stringify({
+                        type: 'server:forward_prompt',
+                        prompt: item.prompt,
+                        workspaceId: item.workspaceId,
+                        images: item.images,
+                        audio: item.audio,
+                        model: item.model,
+                      })
+                    );
+                  }
+                }, idx * 1200);
+              });
             }
           }
         } else {
           this.phoneClients.add(ws);
+          this.lastPhoneActivity = Date.now();
           this.broadcast({
             type: 'server:device_count_updated',
             count: this.phoneClients.size,
@@ -808,15 +1284,34 @@ export class WsGateway {
         ws.send(JSON.stringify({ type: 'server:pong', timestamp: Date.now() }));
         break;
 
-      case 'client:respond_approval':
-        this.hookIpc.resolveApproval(msg.payload);
-        this.workspaceManager.removePendingApproval(msg.payload.requestId);
-        this.broadcast({
-          type: 'server:approval_resolved',
-          requestId: msg.payload.requestId,
-          decision: msg.payload.decision,
-        });
+      case 'client:respond_approval': {
+        const pausedReq = this.hookIpc.getPausedRequest(msg.payload.requestId);
+        if (pausedReq) {
+          this.hookIpc.clearPausedRequest(msg.payload.requestId);
+          this.workspaceManager.removePendingApproval(msg.payload.requestId);
+          this.broadcast({
+            type: 'server:approval_resolved',
+            requestId: msg.payload.requestId,
+            decision: msg.payload.decision,
+          });
+          if (msg.payload.decision === 'allow') {
+            const targetTool = pausedReq.toolTitle || pausedReq.toolCall?.name || 'action';
+            this.handleSendPrompt(`[Approved via Mobile]: Proceed with ${targetTool}`, pausedReq.workspacePath);
+          } else {
+            const answerPrompt = msg.payload.interceptPrompt || msg.payload.reason;
+            if (answerPrompt) {
+              this.handleSendPrompt(answerPrompt, pausedReq.workspacePath);
+            }
+          }
+          break;
+        }
+
+        const resolved = this.hookIpc.resolveApproval(msg.payload);
+        if (resolved) {
+          this.workspaceManager.removePendingApproval(msg.payload.requestId);
+        }
         break;
+      }
 
       case 'client:clear_approvals':
         this.hookIpc.clearAllApprovals('Cleared by user via companion');
@@ -851,6 +1346,18 @@ export class WsGateway {
             quotas: this.ideWatcher.getAgentQuotas(),
           })
         );
+        break;
+      }
+
+      case 'client:update_tabs': {
+        if (Array.isArray(msg.tabs)) {
+          this.activeTabs = msg.tabs;
+          this.broadcast({
+            type: 'server:tabs_updated',
+            tabs: this.activeTabs,
+            workspaceId: msg.workspaceId,
+          });
+        }
         break;
       }
 
@@ -996,9 +1503,100 @@ export class WsGateway {
         break;
       }
 
+      case 'client:launch_project':
+        if (msg.path) {
+          const isAlive = this.isIdeActive();
+          const forwardCb = isAlive ? (p: string) => {
+            let sent = false;
+            for (const extWs of this.extensionClients) {
+              if (extWs.readyState === WebSocket.OPEN) {
+                extWs.send(JSON.stringify({ type: 'server:open_workspace', path: p }));
+                sent = true;
+              }
+            }
+            return sent;
+          } : undefined;
+
+          launchRecentProject(msg.path, forwardCb).then(res => {
+            this.broadcast({
+              type: 'server:recent_projects_updated',
+              projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+            });
+          });
+        }
+        break;
+
+      case 'client:close_ide': {
+        const result = closeProvider(msg.providerId || 'antigravity');
+        this.broadcast({
+          type: 'server:ide_status',
+          status: 'dormant',
+        });
+        this.broadcast({
+          type: 'server:host_telemetry',
+          telemetry: getHostTelemetry('dormant', msg.providerId || 'antigravity'),
+        });
+        const activeWs = this.workspaceManager.listWorkspaces()[0];
+        const freedText = result.ramFreedMb ? ` (~${result.ramFreedMb} MB RAM freed)` : '';
+        this.broadcast({
+          type: 'server:chat_message',
+          workspaceId: activeWs?.id || 'default',
+          message: {
+            id: `close_ide_${Date.now()}`,
+            role: 'system',
+            content: `**Host IDE Closed:** ${result.message}${freedText}. Background daemon remains active and listening.`,
+            timestamp: Date.now(),
+          },
+        });
+        break;
+      }
+
+      case 'client:restart_ide': {
+        const targetPath = this.resolveTargetWorkspace(msg.workspacePath);
+        this.extensionClients.clear();
+        this.extensionWorkspaces.clear();
+        this.broadcast({ type: 'server:ide_status', status: 'dormant' });
+        const activeWs = this.workspaceManager.listWorkspaces()[0];
+        this.broadcast({
+          type: 'server:chat_message',
+          workspaceId: activeWs?.id || 'default',
+          message: {
+            id: `restart_ide_${Date.now()}`,
+            role: 'system',
+            content: `**Host IDE Restarting:** Executing detached batch restart script for Antigravity IDE...`,
+            timestamp: Date.now(),
+          },
+        });
+        restartProvider(msg.providerId || 'antigravity', targetPath).then(result => {
+          this.broadcast({
+            type: 'server:ide_status',
+            status: result.ok ? 'active' : 'dormant',
+          });
+          this.broadcast({
+            type: 'server:host_telemetry',
+            telemetry: getHostTelemetry(result.ok ? 'active' : 'dormant', msg.providerId || 'antigravity'),
+          });
+          this.broadcast({
+            type: 'server:recent_projects_updated',
+            projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+          });
+        });
+        break;
+      }
+
+      case 'client:get_telemetry': {
+        ws.send(
+          JSON.stringify({
+            type: 'server:host_telemetry',
+            telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant'),
+          })
+        );
+        break;
+      }
+
       case 'client:send_prompt': {
         const imgs = msg.images || (msg.imageBase64 ? [{ base64: msg.imageBase64, name: msg.imageName || 'photo.png' }] : []);
-        this.handleSendPrompt(msg.prompt, msg.workspaceId, imgs, msg.audio);
+        this.handleSendPrompt(msg.prompt, msg.workspaceId, imgs, msg.audio, msg.model);
         break;
       }
 
@@ -1007,14 +1605,44 @@ export class WsGateway {
     }
   }
 
+  private resolveTargetWorkspace(explicitPath?: string): string | undefined {
+    if (explicitPath) {
+      const norm = path.resolve(explicitPath);
+      if (
+        fs.existsSync(norm) &&
+        fs.statSync(norm).isDirectory() &&
+        !norm.includes('node_modules') &&
+        !norm.endsWith(path.join('packages', 'cli', 'dist', 'bin'))
+      ) {
+        return norm;
+      }
+    }
+    const list = this.workspaceManager.listWorkspaces();
+    for (const ws of list) {
+      if (ws.path) {
+        const norm = path.resolve(ws.path);
+        if (fs.existsSync(norm) && fs.statSync(norm).isDirectory()) {
+          return norm;
+        }
+      }
+    }
+    const recents = getRecentProjects();
+    if (recents.length > 0 && recents[0].path && fs.existsSync(recents[0].path)) {
+      return path.resolve(recents[0].path);
+    }
+    return undefined;
+  }
+
   private recentPrompts: Map<string, number> = new Map();
 
   public handleSendPrompt(
     prompt: string,
     workspaceId?: string,
     images?: { base64: string; name: string }[],
-    audio?: AudioAttachment
+    audio?: AudioAttachment,
+    model?: string
   ): boolean {
+    this.lastPhoneActivity = Date.now();
     const wsState = (workspaceId ? this.workspaceManager.getWorkspace(workspaceId) : null) || this.workspaceManager.listWorkspaces()[0];
     if (!wsState) return false;
 
@@ -1101,18 +1729,23 @@ export class WsGateway {
           workspaceId: wsState.id,
           images: imgs,
           audio: audio,
+          model: model,
         })
       );
       return true;
     }
 
-    // 3. DORMANT BUFFER: If Extension Host is dormant (closed/reloading), buffer in memory
+    // 3. DORMANT BUFFER: If Extension Host is dormant (closed/reloading), buffer in memory (capped at 5 items)
     console.log(`[WsGateway] Antigravity IDE is dormant. Buffering prompt in memory (${this.pendingHostPrompts.length + 1} queued).`);
+    if (this.pendingHostPrompts.length >= 5) {
+      this.pendingHostPrompts.shift();
+    }
     this.pendingHostPrompts.push({
       prompt: fullPrompt,
       workspaceId: wsState.id,
       images: imgs,
       audio: audio,
+      model: model,
     });
 
     this.broadcast({
