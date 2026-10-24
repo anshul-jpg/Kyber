@@ -121,6 +121,8 @@ export interface HostTelemetry {
   uptimeSeconds: number;
   activeProvider?: string;
   ideStatus: 'active' | 'dormant';
+  hostIdePolicy?: 'always-proceed' | 'always-ask' | 'unknown';
+  isGlobalHookInstalled?: boolean;
 }
 
 // WebSocket message envelope

@@ -75,6 +75,37 @@ export function getCpuPercent(): number {
   }
 }
 
+function checkGlobalHookInstalled(): boolean {
+  try {
+    const globalConfigDir = path.join(os.homedir(), '.gemini', 'config');
+    return fs.existsSync(path.join(globalConfigDir, 'hooks.json')) && fs.existsSync(path.join(globalConfigDir, 'interceptor.js'));
+  } catch {
+    return false;
+  }
+}
+
+function detectHostIdePolicy(): 'always-proceed' | 'always-ask' | 'unknown' {
+  try {
+    const candidates = [
+      path.join(process.env.APPDATA || '', 'Antigravity IDE', 'User', 'settings.json'),
+      path.join(os.homedir(), '.config', 'Antigravity IDE', 'User', 'settings.json'),
+      path.join(os.homedir(), 'Library', 'Application Support', 'Antigravity IDE', 'User', 'settings.json'),
+    ];
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+        if (s['antigravity.toolExecutionPolicy'] === 'always-proceed' || s['antigravity.autoExecutionPolicy'] === 'always-proceed') {
+          return 'always-proceed';
+        }
+        if (s['antigravity.toolExecutionPolicy'] === 'always-ask') {
+          return 'always-ask';
+        }
+      }
+    }
+  } catch {}
+  return 'unknown';
+}
+
 export function getHostTelemetry(ideStatus: 'active' | 'dormant', activeProvider: string = 'antigravity'): HostTelemetry {
   const totalBytes = os.totalmem();
   const freeBytes = os.freemem();
@@ -95,6 +126,8 @@ export function getHostTelemetry(ideStatus: 'active' | 'dormant', activeProvider
     uptimeSeconds: Math.round(os.uptime()),
     activeProvider,
     ideStatus,
+    hostIdePolicy: detectHostIdePolicy(),
+    isGlobalHookInstalled: checkGlobalHookInstalled(),
   };
 }
 

@@ -1209,6 +1209,60 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             )}
 
+            {/* Host IDE Policy & Universal Hook Status */}
+            {hostTelemetry && (
+              <div
+                style={{
+                  padding: '9px 12px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '7px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
+                  <span style={{ color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Shield size={13} color="#0078d4" />
+                    Host IDE Native Policy
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      background: hostTelemetry.hostIdePolicy === 'always-proceed' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+                      color: hostTelemetry.hostIdePolicy === 'always-proceed' ? '#34d399' : '#fbbf24',
+                      border: `1px solid ${hostTelemetry.hostIdePolicy === 'always-proceed' ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+                    }}
+                  >
+                    {hostTelemetry.hostIdePolicy === 'always-proceed' ? 'Autonomous (Proceed)' : hostTelemetry.hostIdePolicy === 'always-ask' ? 'Always Ask (PC Dialogs)' : 'Synchronized'}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
+                  <span style={{ color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Globe size={13} color="#0078d4" />
+                    Universal Global Hook
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: '4px',
+                      background: hostTelemetry.isGlobalHookInstalled ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.06)',
+                      color: hostTelemetry.isGlobalHookInstalled ? '#34d399' : '#858585',
+                      border: `1px solid ${hostTelemetry.isGlobalHookInstalled ? 'rgba(16, 185, 129, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
+                    }}
+                  >
+                    {hostTelemetry.isGlobalHookInstalled ? 'Active Everywhere' : 'Workspace Only'}
+                  </span>
+                </div>
+              </div>
+            )}
+
             {/* Emergency Stop Button */}
             <button
               type="button"

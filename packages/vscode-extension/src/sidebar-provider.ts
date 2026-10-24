@@ -87,6 +87,14 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
           await this.hookManager.disableInCurrentWorkspace();
           this.updateWebview();
           break;
+        case 'enableGlobalHook':
+          await this.hookManager.enableGlobally();
+          this.updateWebview();
+          break;
+        case 'disableGlobalHook':
+          await this.hookManager.disableGlobally();
+          this.updateWebview();
+          break;
         case 'resolveApproval':
           this.daemonManager.resolveApproval(data.requestId, data.decision);
           break;
@@ -208,6 +216,7 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
       logs,
       hasCfToken,
       isHookInstalled,
+      isGlobalHookInstalled: this.hookManager.isInstalledGlobally(),
       activeEndpointType: this.activeEndpointType,
       qrSvg,
     });

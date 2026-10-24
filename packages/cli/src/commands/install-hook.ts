@@ -230,7 +230,70 @@ const HOOKS_JSON_CONTENT = JSON.stringify(
   2
 );
 
-export function installHook(targetDirArg?: string): void {
+export function installGlobalHook(): void {
+  const globalConfigDir = path.join(os.homedir(), '.gemini', 'config');
+  if (!fs.existsSync(globalConfigDir)) {
+    fs.mkdirSync(globalConfigDir, { recursive: true });
+  }
+
+  const globalInterceptorPath = path.join(globalConfigDir, 'interceptor.js');
+  const globalHooksJsonPath = path.join(globalConfigDir, 'hooks.json');
+  const globalModePath = path.resolve(os.homedir(), '.agy-companion-mode');
+
+  // Write interceptor script
+  fs.writeFileSync(globalInterceptorPath, INTERCEPTOR_TEMPLATE, 'utf8');
+
+  // Command must use forward slashes and quotes to protect against spaces in paths on Windows
+  const cleanScriptPath = globalInterceptorPath.replace(/\\/g, '/');
+  const globalHooksContent = JSON.stringify(
+    {
+      "companion-interceptor": {
+        PreToolUse: [
+          {
+            matcher: "run_command|write_to_file|replace_file_content|multi_replace_file_content|ask_question",
+            hooks: [
+              {
+                type: "command",
+                command: `node "${cleanScriptPath}"`,
+                timeout: 130
+              }
+            ]
+          }
+        ]
+      }
+    },
+    null,
+    2
+  );
+
+  fs.writeFileSync(globalHooksJsonPath, globalHooksContent, 'utf8');
+
+  // Lock user preferences in state.vscdb and User settings.json
+  lockUserPreferencesToAlwaysProceed();
+
+  // Ensure global ~/.agy-companion-mode exists (default to desk if not set)
+  if (!fs.existsSync(globalModePath)) {
+    fs.writeFileSync(globalModePath, 'desk', 'utf8');
+  }
+
+  console.log('\n===========================================================');
+  console.log('   🌐 Antigravity Companion Global Hook Installed!');
+  console.log('===========================================================');
+  console.log(`📁 Global Config dir:   ${globalConfigDir}`);
+  console.log(`⚙️  Global Hooks JSON:   ${globalHooksJsonPath}`);
+  console.log(`⚡ Global Interceptor:  ${globalInterceptorPath}`);
+  console.log(`🌐 Global Mode file:    ${globalModePath}`);
+  console.log('-----------------------------------------------------------');
+  console.log('✨ Any Antigravity task in ANY workspace or fresh folder will now');
+  console.log('   automatically route approvals to your companion phone in Remote mode,');
+  console.log('   even across new projects and account switches!\n');
+}
+
+export function installHook(targetDirArg?: string, isGlobal?: boolean): void {
+  if (isGlobal || targetDirArg === '--global' || targetDirArg === '-g' || targetDirArg === 'global') {
+    return installGlobalHook();
+  }
+
   const targetDir = path.resolve(process.cwd(), targetDirArg || '.');
   const agentsDir = path.join(targetDir, '.agents');
   const interceptorPath = path.join(agentsDir, 'interceptor.js');

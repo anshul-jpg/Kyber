@@ -110,6 +110,85 @@ export class HookManager extends EventEmitter {
     }
   }
 
+  public isInstalledGlobally(): boolean {
+    const globalConfigDir = path.join(os.homedir(), '.gemini', 'config');
+    const hookFile = path.join(globalConfigDir, 'hooks.json');
+    const interceptorFile = path.join(globalConfigDir, 'interceptor.js');
+    return fs.existsSync(hookFile) && fs.existsSync(interceptorFile);
+  }
+
+  public async enableGlobally(): Promise<boolean> {
+    try {
+      const globalConfigDir = path.join(os.homedir(), '.gemini', 'config');
+      if (!fs.existsSync(globalConfigDir)) {
+        fs.mkdirSync(globalConfigDir, { recursive: true });
+      }
+
+      const interceptorPath = path.join(globalConfigDir, 'interceptor.js');
+      const hooksJsonPath = path.join(globalConfigDir, 'hooks.json');
+      const cleanScriptPath = interceptorPath.replace(/\\/g, '/');
+
+      const interceptorScript = this.getInterceptorScriptContent();
+      fs.writeFileSync(interceptorPath, interceptorScript, 'utf8');
+
+      const globalHooksContent = JSON.stringify(
+        {
+          'companion-interceptor': {
+            PreToolUse: [
+              {
+                matcher: 'run_command|write_to_file|replace_file_content|multi_replace_file_content|ask_question',
+                hooks: [
+                  {
+                    type: 'command',
+                    command: `node "${cleanScriptPath}"`,
+                    timeout: 130,
+                  },
+                ],
+              },
+            ],
+          },
+        },
+        null,
+        2
+      );
+      fs.writeFileSync(hooksJsonPath, globalHooksContent, 'utf8');
+
+      // Lock global user preferences in state.vscdb and User settings.json
+      lockUserPreferencesToAlwaysProceed();
+
+      // Ensure global ~/.agy-companion-mode exists
+      const globalModePath = path.resolve(os.homedir(), '.agy-companion-mode');
+      if (!fs.existsSync(globalModePath)) {
+        fs.writeFileSync(globalModePath, 'desk', 'utf8');
+      }
+
+      this.emit('hook_status_changed', true);
+      vscode.window.showInformationMessage('🌐 Antigravity Companion Global Hook enabled for all workspaces & accounts.');
+      return true;
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Failed to install global hook: ${err.message}`);
+      return false;
+    }
+  }
+
+  public async disableGlobally(): Promise<boolean> {
+    try {
+      const globalConfigDir = path.join(os.homedir(), '.gemini', 'config');
+      const hookFile = path.join(globalConfigDir, 'hooks.json');
+      const interceptorFile = path.join(globalConfigDir, 'interceptor.js');
+
+      if (fs.existsSync(hookFile)) fs.unlinkSync(hookFile);
+      if (fs.existsSync(interceptorFile)) fs.unlinkSync(interceptorFile);
+
+      this.emit('hook_status_changed', false);
+      vscode.window.showInformationMessage('Antigravity Companion Global Hook disabled.');
+      return true;
+    } catch (err: any) {
+      vscode.window.showErrorMessage(`Failed to remove global hook: ${err.message}`);
+      return false;
+    }
+  }
+
   public async disableInCurrentWorkspace(): Promise<boolean> {
     const ws = this.getActiveWorkspacePath();
     if (!ws) return false;

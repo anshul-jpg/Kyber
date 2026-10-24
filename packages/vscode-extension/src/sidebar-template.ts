@@ -12,6 +12,7 @@ export interface SidebarRenderContext {
   logs: LogLine[];
   hasCfToken: boolean;
   isHookInstalled: boolean;
+  isGlobalHookInstalled?: boolean;
   activeEndpointType: 'local' | 'tailscale' | 'cloudflare';
   qrSvg: string;
 }
@@ -37,6 +38,7 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
     logs,
     hasCfToken,
     isHookInstalled,
+    isGlobalHookInstalled = false,
     activeEndpointType,
     qrSvg,
   } = ctx;
@@ -553,6 +555,17 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
       <button class="btn-xs" style="color: var(--accent-rose);" data-cmd="disableHook" onclick="sendMsg('disableHook')" title="Unlink companion hook from this workspace">Unlink</button>
     </div>
   `}
+
+  <!-- Universal Global Hook Indicator -->
+  <div class="linked-banner" style="margin-top: -3px; margin-bottom: 9px; border-color: ${isGlobalHookInstalled ? 'rgba(16, 185, 129, 0.2)' : 'var(--border-hairline)'};">
+    <div class="linked-left">
+      <span class="linked-dot" style="background: ${isGlobalHookInstalled ? 'var(--accent-emerald)' : 'var(--text-muted)'}; ${isGlobalHookInstalled ? 'box-shadow: 0 0 6px rgba(16, 185, 129, 0.4);' : ''}"></span>
+      <span style="font-size: 11px;">${isGlobalHookInstalled ? 'Global Hook Active (All Workspaces)' : 'Global Hook Inactive'}</span>
+    </div>
+    <button class="btn-xs" style="color: ${isGlobalHookInstalled ? 'var(--accent-rose)' : 'var(--accent-blue)'};" data-cmd="${isGlobalHookInstalled ? 'disableGlobalHook' : 'enableGlobalHook'}" onclick="sendMsg('${isGlobalHookInstalled ? 'disableGlobalHook' : 'enableGlobalHook'}')" title="${isGlobalHookInstalled ? 'Disable global hook' : 'Enable companion hook for all projects'}">
+      ${isGlobalHookInstalled ? 'Unlink' : 'Enable Everywhere'}
+    </button>
+  </div>
 
   <!-- Live Mesh & Network Indicators Matrix -->
   <div class="mesh-matrix">

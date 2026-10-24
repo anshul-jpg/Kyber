@@ -131,10 +131,11 @@ async function startCloudflareTunnel(port: number, token?: string): Promise<{ ur
 async function main() {
   const args = process.argv.slice(2);
 
-  // Subcommand: agy-companion hook install [dir]
+  // Subcommand: agy-companion hook install [dir | --global]
   if (args[0] === 'hook' && args[1] === 'install') {
-    const targetDir = args[2] || '.';
-    installHook(targetDir);
+    const isGlobal = args.includes('--global') || args.includes('-g') || args[2] === 'global';
+    const targetDir = isGlobal ? undefined : (args[2] || '.');
+    installHook(targetDir, isGlobal);
     process.exit(0);
   }
 
@@ -144,13 +145,15 @@ async function main() {
 Antigravity Companion CLI
 
 Commands:
-  agy-companion                  Start the companion daemon server
-  agy-companion --tunnel         Start daemon with a free Cloudflare Quick Tunnel (public HTTPS)
-  agy-companion hook install [d] Install universal interceptor hook into target directory (default: .)
+  agy-companion                     Start the companion daemon server
+  agy-companion --tunnel            Start daemon with a free Cloudflare Quick Tunnel (public HTTPS)
+  agy-companion hook install [dir]  Install universal hook into project workspace (default: .)
+  agy-companion hook install -g     Install universal hook globally (~/.gemini/config/hooks.json)
 
 Options:
-  --tunnel                       Expose over public HTTPS via Cloudflare Quick Tunnel
-  --help, -h                     Show this help message
+  --tunnel                          Expose over public HTTPS via Cloudflare Quick Tunnel
+  --global, -g                      Install hook globally for all projects & workspaces
+  --help, -h                        Show this help message
 `);
     process.exit(0);
   }

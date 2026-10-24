@@ -80,9 +80,9 @@ function parseGitOutput(cwd: string, numstat: string, status: string): GitFileCh
 }
 
 function refreshGitChangesAsync(normCwd: string): void {
-  execFile('git', ['diff', '--numstat'], { cwd: normCwd, encoding: 'utf8', timeout: 2500 }, (err1, numstat) => {
+  execFile('git', ['diff', '--numstat'], { cwd: normCwd, encoding: 'utf8', timeout: 2500, windowsHide: true }, (err1, numstat) => {
     if (err1) return;
-    execFile('git', ['status', '--porcelain'], { cwd: normCwd, encoding: 'utf8', timeout: 2500 }, (err2, status) => {
+    execFile('git', ['status', '--porcelain'], { cwd: normCwd, encoding: 'utf8', timeout: 2500, windowsHide: true }, (err2, status) => {
       if (err2) return;
       try {
         const changes = parseGitOutput(normCwd, numstat || '', status || '');
