@@ -28,6 +28,8 @@ import {
 import { triggerHaptic } from './components/CommonUI';
 import { Header } from './components/Header';
 import { EditorTabsStrip } from './components/EditorTabsStrip';
+import { SegmentedNav, WorkspaceViewSegment } from './components/SegmentedNav';
+import { WorkspaceTabsView } from './components/WorkspaceTabsView';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatFeed } from './components/ChatFeed';
 import { ApprovalCards } from './components/ApprovalCards';
@@ -114,6 +116,7 @@ export default function App() {
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [selectedTabFile, setSelectedTabFile] = useState<{ path: string; name: string } | null>(null);
+  const [activeSegment, setActiveSegment] = useState<WorkspaceViewSegment>('chat');
 
   // Prompt & Input Dock States
   const [promptText, setPromptText] = useState<string>('');
@@ -885,6 +888,37 @@ export default function App() {
     setActiveActionModal(modal);
   }, []);
 
+  const handleSelectTab = useCallback((tab: EditorTab) => {
+    if (tab.path || tab.label) {
+      setEditorTabs(prev =>
+        prev.map(t => ({
+          ...t,
+          isActive: (t.path && tab.path ? t.path === tab.path : t.label === tab.label),
+        }))
+      );
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'client:open_editor_tab',
+            path: tab.path || tab.label,
+          })
+        );
+      }
+    }
+  }, []);
+
+  const handleInspectTab = useCallback((tab: EditorTab) => {
+    setSelectedTabFile({ path: tab.path || tab.label, name: tab.label });
+    setActiveActionModal('explorer');
+  }, []);
+
+  const handleSelectSegment = useCallback((segment: WorkspaceViewSegment) => {
+    if (segment === 'explorer') {
+      setActiveActionModal('explorer');
+    }
+    setActiveSegment(segment);
+  }, []);
+
   return (
     <div
       style={{
@@ -957,38 +991,24 @@ export default function App() {
         onRestartIde={handleRestartIde}
       />
 
-      {/* Active Editor Tabs Strip */}
-      <EditorTabsStrip
-        tabs={editorTabs}
-        activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
-        onSelectTab={tab => {
-          if (tab.path || tab.label) {
-            setEditorTabs(prev =>
-              prev.map(t => ({
-                ...t,
-                isActive: (t.path && tab.path ? t.path === tab.path : t.label === tab.label),
-              }))
-            );
-            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-              wsRef.current.send(
-                JSON.stringify({
-                  type: 'client:open_editor_tab',
-                  path: tab.path || tab.label,
-                })
-              );
-            }
-          }
-        }}
-        onInspectTab={tab => {
-          setSelectedTabFile({ path: tab.path || tab.label, name: tab.label });
-          setActiveActionModal('explorer');
-        }}
-        onOpenExplorer={() => {
-          setSelectedTabFile(null);
-          setActiveActionModal('explorer');
-        }}
-        modifiedFiles={modifiedFilesList}
+      {/* Level 3 Segmented 3-Pillar Switcher */}
+      <SegmentedNav
+        activeSegment={activeSegment}
+        onSelectSegment={handleSelectSegment}
+        tabsCount={editorTabs.length}
       />
+
+      {/* Active Editor Tabs Strip (Glanceable touch strip in Chat view) */}
+      {activeSegment === 'chat' && (
+        <EditorTabsStrip
+          tabs={editorTabs}
+          activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+          onSelectTab={handleSelectTab}
+          onInspectTab={handleInspectTab}
+          onOpenExplorer={() => handleSelectSegment('explorer')}
+          modifiedFiles={modifiedFilesList}
+        />
+      )}
 
       {/* 401 Unauthorized Re-Pairing Banner */}
       {authError && !connected && (
@@ -1087,7 +1107,16 @@ export default function App() {
           boxSizing: 'border-box',
         }}
       >
-        {chatMessages.length === 0 && pendingApprovals.length === 0 ? (
+        {activeSegment === 'tabs' ? (
+          <WorkspaceTabsView
+            tabs={editorTabs}
+            activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+            onSelectTab={handleSelectTab}
+            onInspectTab={handleInspectTab}
+            onOpenExplorer={() => handleSelectSegment('explorer')}
+            modifiedFiles={modifiedFilesList}
+          />
+        ) : chatMessages.length === 0 && pendingApprovals.length === 0 ? (
           <HomeScreen
             workspaces={workspaces}
             activeWorkspaceId={activeWorkspaceId}
@@ -1204,6 +1233,9 @@ export default function App() {
         onClose={() => {
           setActiveActionModal(null);
           setSelectedTabFile(null);
+          if (activeSegment === 'explorer') {
+            setActiveSegment('chat');
+          }
         }}
         expandedFolders={expandedFolders}
         onToggleFolder={toggleFolder}
