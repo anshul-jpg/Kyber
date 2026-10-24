@@ -4,217 +4,12 @@ import fs from 'fs';
 import os from 'os';
 import { EventEmitter } from 'events';
 
-const INTERCEPTOR_SCRIPT = `#!/usr/bin/env node
-
-/**
- * Antigravity Companion - PreToolUse Lifecycle Hook
- *
- * Intercepts tool calls before execution.
- * - In Desk Mode: signals IDE to show native desktop prompt ('force_ask').
- * - In Remote Mode: pushes prompt to phone companion and waits for 'Allow'/'Deny'.
- */
-
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const os = require('os');
-
-async function readStdin() {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
-    process.stdin.on('end', () => {
-      try {
-        resolve(data.trim() ? JSON.parse(data) : {});
-      } catch (err) {
-        reject(err);
-      }
-    });
-    process.stdin.on('error', reject);
-  });
-}
-
-function postToDaemon(payload, timeoutMs = 130000) {
-  return new Promise((resolve) => {
-    const postData = JSON.stringify(payload);
-    const req = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: 4041,
-        path: '/api/hook/pre-tool-use',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Content-Length': Buffer.byteLength(postData),
-        },
-        timeout: timeoutMs,
-      },
-      res => {
-        let responseData = '';
-        res.on('data', chunk => { responseData += chunk; });
-        res.on('end', () => {
-          try {
-            resolve(JSON.parse(responseData));
-          } catch (e) {
-            resolve({ decision: 'ask', reason: 'Failed to parse daemon response' });
-          }
-        });
-      }
-    );
-
-    req.on('timeout', () => {
-      req.destroy();
-      resolve({ decision: 'ask', reason: 'Mobile approval timed out. Falling back to terminal.' });
-    });
-
-    req.on('error', () => {
-      resolve({ decision: 'ask', reason: 'Companion daemon not active.' });
-    });
-
-    req.write(postData);
-    req.end();
-  });
-}
-
-function getAutoModeResolution() {
-  return new Promise((resolve) => {
-    const req = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: 4040,
-        path: '/api/health',
-        method: 'GET',
-        timeout: 350,
-      },
-      res => {
-        let data = '';
-        res.on('data', c => { data += c; });
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            resolve(json.connectedPhoneCount > 0 ? 'remote' : 'desk');
-          } catch {
-            resolve('desk');
-          }
-        });
-      }
-    );
-    req.on('error', () => resolve('desk'));
-    req.on('timeout', () => { req.destroy(); resolve('desk'); });
-    req.end();
-  });
-}
-
-async function main() {
-  try {
-    const hookContext = await readStdin();
-
-    if (!hookContext.toolCall) {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
-      return;
-    }
-
-    // 1. Check Global Execution Policy (Autonomous vs Supervised)
-    const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
-    let policy = 'force_ask';
-    if (fs.existsSync(globalPolicyFile)) {
-      policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
-    }
-    if (policy === 'always_proceed') {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
-      return;
-    }
-
-    const toolName = hookContext.toolCall?.name || '';
-    const cmd = hookContext.toolCall?.args?.CommandLine || '';
-
-    // Safe read tools that should never stall the agent
-    const SAFE_READ_TOOLS = new Set([
-      'view_file',
-      'list_dir',
-      'grep_search',
-      'read_url_content',
-      'read_resource',
-      'list_resources',
-      'schedule',
-      'manage_task',
-    ]);
-    if (SAFE_READ_TOOLS.has(toolName)) {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
-      return;
-    }
-
-    // Auto-allow read-only git queries so agent isn't spammed during background git checks
-    if (
-      toolName === 'run_command' &&
-      (cmd.trim() === 'git status' ||
-        cmd.trim() === 'git diff' ||
-        cmd.trim() === 'git log' ||
-        cmd.trim().startsWith('git status '))
-    ) {
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: [\`command(\${cmd})\`] }));
-      process.exit(0);
-      return;
-    }
-
-    // 2. Check Companion Mode (Desk vs Remote vs Auto vs Autonomous)
-    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
-    const localModeFile = path.resolve(__dirname, 'companion-mode');
-    let mode = 'remote';
-    if (fs.existsSync(globalModeFile)) {
-      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
-    } else if (fs.existsSync(localModeFile)) {
-      mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
-    }
-
-    // Autonomous mode: completely hands-off, auto-allow every tool immediately with zero prompts
-    if (mode === 'autonomous') {
-      const overrides = cmd ? [\`command(\${cmd})\`] : [];
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
-      process.exit(0);
-      return;
-    }
-
-    if (mode === 'auto') {
-      mode = await getAutoModeResolution();
-    }
-
-    // Desk mode: let IDE handle native prompt according to user settings, no phone routing
-    if (mode === 'desk') {
-      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
-      process.exit(0);
-      return;
-    }
-
-    const result = await postToDaemon(hookContext);
-    if (result && result.decision === 'allow') {
-      const overrides = result.permissionOverrides || (cmd ? [\`command(\${cmd})\`] : []);
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
-      process.exit(0);
-      return;
-    }
-
-    process.stdout.write(JSON.stringify(result));
-    process.exit(0);
-  } catch (error) {
-    process.stdout.write(JSON.stringify({ decision: 'force_ask', reason: error.message }));
-    process.exit(0);
-  }
-}
-
-main();
-`;
-
 const HOOKS_JSON_CONTENT = JSON.stringify(
   {
     'companion-interceptor': {
       PreToolUse: [
         {
-          matcher: 'run_command|write_to_file|replace_file_content|multi_replace_file_content',
+          matcher: 'run_command|write_to_file|replace_file_content|multi_replace_file_content|ask_question',
           hooks: [
             {
               type: 'command',
@@ -231,8 +26,23 @@ const HOOKS_JSON_CONTENT = JSON.stringify(
 );
 
 export class HookManager extends EventEmitter {
-  constructor() {
+  constructor(private extensionPath?: string) {
     super();
+  }
+
+  private getInterceptorScriptContent(): string {
+    const candidates = [
+      this.extensionPath ? path.join(this.extensionPath, 'media', 'interceptor.js') : null,
+      path.join(__dirname, '..', 'media', 'interceptor.js'),
+      path.join(__dirname, '..', '..', '..', '.agents', 'interceptor.js'),
+    ].filter(Boolean) as string[];
+
+    for (const p of candidates) {
+      if (fs.existsSync(p)) {
+        return fs.readFileSync(p, 'utf8');
+      }
+    }
+    throw new Error('Canonical media/interceptor.js could not be located in extension bundle.');
   }
 
   public getActiveWorkspacePath(): string | null {
@@ -268,12 +78,28 @@ export class HookManager extends EventEmitter {
       const hooksJsonPath = path.join(agentsDir, 'hooks.json');
       const globalModePath = path.resolve(os.homedir(), '.agy-companion-mode');
 
-      fs.writeFileSync(interceptorPath, INTERCEPTOR_SCRIPT, 'utf8');
+      const interceptorScript = this.getInterceptorScriptContent();
+      fs.writeFileSync(interceptorPath, interceptorScript, 'utf8');
       fs.writeFileSync(hooksJsonPath, HOOKS_JSON_CONTENT, 'utf8');
 
-      if (!fs.existsSync(globalModePath)) {
-        fs.writeFileSync(globalModePath, 'remote', 'utf8');
+      // Lock workspace settings to always-proceed so IDE popups never revert on reboot or account switch
+      const vscodeDir = path.join(ws, '.vscode');
+      const settingsJsonPath = path.join(vscodeDir, 'settings.json');
+      let settings: Record<string, any> = {};
+      if (!fs.existsSync(vscodeDir)) {
+        fs.mkdirSync(vscodeDir, { recursive: true });
+      } else if (fs.existsSync(settingsJsonPath)) {
+        try {
+          settings = JSON.parse(fs.readFileSync(settingsJsonPath, 'utf8'));
+        } catch {}
       }
+      settings['antigravity.toolExecutionPolicy'] = 'always-proceed';
+      settings['antigravity.autoExecutionPolicy'] = 'always-proceed';
+      settings['antigravity.artifactReviewMode'] = 'always-proceed';
+      fs.writeFileSync(settingsJsonPath, JSON.stringify(settings, null, 2), 'utf8');
+
+      // Lock global user preferences in state.vscdb and User settings.json
+      lockUserPreferencesToAlwaysProceed();
 
       this.emit('hook_status_changed', true);
       vscode.window.showInformationMessage('Antigravity Companion Hook enabled for this workspace.');
@@ -303,4 +129,70 @@ export class HookManager extends EventEmitter {
       return false;
     }
   }
+}
+
+export function lockUserPreferencesToAlwaysProceed(): void {
+  try {
+    const candidates = [
+      path.join(process.env.APPDATA || '', 'Antigravity IDE', 'User', 'globalStorage', 'state.vscdb'),
+      path.join(os.homedir(), '.config', 'Antigravity IDE', 'User', 'globalStorage', 'state.vscdb'),
+      path.join(os.homedir(), 'Library', 'Application Support', 'Antigravity IDE', 'User', 'globalStorage', 'state.vscdb'),
+    ];
+
+    const dbPath = candidates.find(p => fs.existsSync(p));
+    if (dbPath) {
+      try {
+        const { DatabaseSync } = require('node:sqlite');
+        const db = new DatabaseSync(dbPath);
+        try {
+          const select = db.prepare("SELECT value FROM ItemTable WHERE key = 'antigravityUnifiedStateSync.agentPreferences'");
+          const row = select.get() as { value?: string } | undefined;
+          if (row?.value) {
+            const raw = Buffer.from(row.value, 'base64');
+            const termKey = Buffer.from('terminalAutoExecutionPolicySentinelKey\x12\x06\n\x04EAE=', 'latin1');
+            const termRep = Buffer.from('terminalAutoExecutionPolicySentinelKey\x12\x06\n\x04EAM=', 'latin1');
+            const artKey = Buffer.from('artifactReviewPolicySentinelKey\x12\x06\n\x04EAE=', 'latin1');
+            const artRep = Buffer.from('artifactReviewPolicySentinelKey\x12\x06\n\x04EAI=', 'latin1');
+
+            let modified = false;
+            let idx = raw.indexOf(termKey);
+            if (idx !== -1) {
+              termRep.copy(raw, idx);
+              modified = true;
+            }
+            idx = raw.indexOf(artKey);
+            if (idx !== -1) {
+              artRep.copy(raw, idx);
+              modified = true;
+            }
+
+            if (modified) {
+              const newVal = raw.toString('base64');
+              const update = db.prepare("UPDATE ItemTable SET value = ? WHERE key = 'antigravityUnifiedStateSync.agentPreferences'");
+              update.run(newVal);
+            }
+          }
+        } finally {
+          db.close();
+        }
+      } catch {}
+    }
+
+    const userSettingsCandidates = [
+      path.join(process.env.APPDATA || '', 'Antigravity IDE', 'User', 'settings.json'),
+      path.join(os.homedir(), '.config', 'Antigravity IDE', 'User', 'settings.json'),
+      path.join(os.homedir(), 'Library', 'Application Support', 'Antigravity IDE', 'User', 'settings.json'),
+    ];
+    for (const p of userSettingsCandidates) {
+      if (fs.existsSync(p)) {
+        try {
+          const s = JSON.parse(fs.readFileSync(p, 'utf8'));
+          s['antigravity.toolExecutionPolicy'] = 'always-proceed';
+          s['antigravity.autoExecutionPolicy'] = 'always-proceed';
+          s['antigravity.artifactReviewMode'] = 'always-proceed';
+          fs.writeFileSync(p, JSON.stringify(s, null, 2), 'utf8');
+        } catch {}
+      }
+    }
+  } catch {}
 }

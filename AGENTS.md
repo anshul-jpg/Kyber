@@ -52,7 +52,7 @@ When the user says **"enable companion in this project"**, **"setup companion"**
 
 ## Companion Daemon Process Boundary & Zero Zombie Tasks
 - **Never spawn `agy-companion start` inside a chat turn via `run_command`:** Daemon lifecycle is managed exclusively by the Antigravity VS Code Extension (`antigravityCompanion.startDaemon`, `daemon-manager.ts`) or the user. Running persistent daemons as chat tasks pollutes the conversation state machine with background jobs, triggering unprompted `<SYSTEM_MESSAGE>` wakeups and locking user messages into "Queued Messages".
-- **Keep agent inspection queries synchronous:** Never push simple shell read/grep queries into background tasks. Run them with sufficient synchronous timeout (`WaitMsBeforeAsync: 10000`).
+- **Full Support for `ask_question` via Mobile QuestionCard:** `ask_question` is fully intercepted by the Antigravity Companion PreToolUse hook (`interceptor.js` -> `ipc-server.ts:4041`). In Remote Mode, questions render directly on the user's phone companion as a native, 1:1 Antigravity-styled `QuestionCard` with numbered selectable chips, write-in support for "Other", and haptic Skip/Submit buttons. When the user taps their choice on mobile, it resolves seamlessly back to the IDE without ever requiring anyone to touch the desktop PC. In Desk Mode, it falls back to native desktop IDE dialogs.
 
 ## Core Philosophy: Ship Unfinished & The Open Connector Doctrine
 

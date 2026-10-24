@@ -3,9 +3,21 @@
 /**
  * Antigravity Companion - PreToolUse Lifecycle Hook
  *
- * Intercepts tool calls before execution.
- * - In Desk Mode: signals IDE to show native desktop prompt ('force_ask').
- * - In Remote Mode: pushes prompt to phone companion and waits for 'Allow'/'Deny'.
+ * Three-Mode Policy:
+ * 1. Remote Mode:
+ *    - ALL tool approval cards and questions route to mobile phone companion (port 4041).
+ *    - ZERO desktop popups in Antigravity IDE under any circumstances.
+ *    - If daemon is unreachable or mobile times out, returns 'deny' with a paused explanation.
+ *      Never returns 'force_ask' or 'ask' to PC.
+ *
+ * 2. Desk Mode:
+ *    - ALL tool approval cards and questions prompt on PC IDE desktop ('force_ask').
+ *    - Mobile receives zero prompts.
+ *
+ * 3. Auto Mode:
+ *    - Autonomous execution: tools proceed without asking ('allow').
+ *    - If forced ask (e.g. ask_question or explicit policy override):
+ *      Prompts on whichever target device is selected (Remote = Phone, Desk = PC IDE).
  */
 
 const http = require('http');
@@ -13,11 +25,26 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
+function sendDecisionAndExit(decisionObj) {
+  try {
+    fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} Hook decision: ${JSON.stringify(decisionObj)}\n`);
+  } catch {}
+  const json = JSON.stringify(decisionObj) + '\n';
+  process.stdout.write(json, () => {
+    process.exit(0);
+  });
+  setTimeout(() => {
+    process.exit(0);
+  }, 100);
+}
+
 async function readStdin() {
   return new Promise((resolve, reject) => {
     let data = '';
     process.stdin.setEncoding('utf8');
-    process.stdin.on('data', chunk => { data += chunk; });
+    process.stdin.on('data', chunk => {
+      data += chunk;
+    });
     process.stdin.on('end', () => {
       try {
         resolve(data.trim() ? JSON.parse(data) : {});
@@ -46,12 +73,14 @@ function postToDaemon(payload, timeoutMs = 130000) {
       },
       res => {
         let responseData = '';
-        res.on('data', chunk => { responseData += chunk; });
+        res.on('data', chunk => {
+          responseData += chunk;
+        });
         res.on('end', () => {
           try {
             resolve(JSON.parse(responseData));
           } catch (e) {
-            resolve({ decision: 'force_ask', reason: 'Failed to parse daemon response' });
+            resolve({ decision: 'deny', reason: 'Failed to parse daemon response. Session held safely.' });
           }
         });
       }
@@ -59,11 +88,11 @@ function postToDaemon(payload, timeoutMs = 130000) {
 
     req.on('timeout', () => {
       req.destroy();
-      resolve({ decision: 'force_ask', reason: 'Mobile approval timed out. Falling back to terminal prompt.' });
+      resolve({ decision: 'deny', reason: 'Mobile approval timed out (130s). Session held safely without PC modal.' });
     });
 
     req.on('error', () => {
-      resolve({ decision: 'force_ask', reason: 'Companion daemon not active.' });
+      resolve({ decision: 'deny', reason: 'Companion daemon not active on port 4041. Session held safely.' });
     });
 
     req.write(postData);
@@ -71,64 +100,20 @@ function postToDaemon(payload, timeoutMs = 130000) {
   });
 }
 
-function getAutoModeResolution() {
-  return new Promise((resolve) => {
-    const req = http.request(
-      {
-        hostname: '127.0.0.1',
-        port: 4040,
-        path: '/api/health',
-        method: 'GET',
-        timeout: 350,
-      },
-      res => {
-        let data = '';
-        res.on('data', c => { data += c; });
-        res.on('end', () => {
-          try {
-            const json = JSON.parse(data);
-            resolve(json.connectedPhoneCount > 0 ? 'remote' : 'desk');
-          } catch {
-            resolve('desk');
-          }
-        });
-      }
-    );
-    req.on('error', () => resolve('desk'));
-    req.on('timeout', () => { req.destroy(); resolve('desk'); });
-    req.end();
-  });
-}
-
 async function main() {
+  let mode = 'remote';
   try {
     const hookContext = await readStdin();
-    try {
-      fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} Hook invoked: ${JSON.stringify(hookContext)}\n`);
-    } catch {}
 
     if (!hookContext.toolCall) {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
+      sendDecisionAndExit({ decision: 'allow' });
       return;
     }
 
-    // 1. Check Global Execution Policy (Autonomous vs Supervised)
-    const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
-    let policy = 'force_ask';
-    if (fs.existsSync(globalPolicyFile)) {
-      policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
-    }
-    if (policy === 'always_proceed') {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
-      return;
-    }
-
-    const toolName = hookContext.toolCall.name || '';
+    const toolName = hookContext.toolCall?.name || '';
     const cmd = hookContext.toolCall?.args?.CommandLine || '';
 
-    // Safe read tools that should never stall the agent
+    // Safe read tools that never require user approval
     const SAFE_READ_TOOLS = new Set([
       'view_file',
       'list_dir',
@@ -140,68 +125,81 @@ async function main() {
       'manage_task',
     ]);
     if (SAFE_READ_TOOLS.has(toolName)) {
-      process.stdout.write(JSON.stringify({ decision: 'allow' }));
-      process.exit(0);
+      sendDecisionAndExit({ decision: 'allow' });
       return;
     }
 
-    // Auto-allow read-only git queries so agent isn't spammed during background git checks
-    if (
-      toolName === 'run_command' &&
-      (cmd.trim() === 'git status' ||
-        cmd.trim() === 'git diff' ||
-        cmd.trim() === 'git log' ||
-        cmd.trim().startsWith('git status '))
-    ) {
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: [`command(${cmd})`] }));
-      process.exit(0);
-      return;
-    }
-
-    // 2. Check Companion Mode (Desk vs Remote vs Auto vs Autonomous)
+    // 1. Read Global & Local Companion Mode
     const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
     const localModeFile = path.resolve(__dirname, 'companion-mode');
-    let mode = 'remote';
     if (fs.existsSync(globalModeFile)) {
       mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
     } else if (fs.existsSync(localModeFile)) {
       mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
     }
 
-    // Autonomous mode: completely hands-off, auto-allow every tool immediately with zero prompts
-    if (mode === 'autonomous') {
-      const overrides = cmd ? [`command(${cmd})`] : [];
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
-      process.exit(0);
+    // 2. Read Global Execution Policy (Strict / Supervised vs Always Proceed / Autonomous)
+    const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
+    let policy = 'force_ask';
+    if (fs.existsSync(globalPolicyFile)) {
+      policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
+    }
+
+    // If policy is Always Allow / Always Proceed, or mode is Auto/Autonomous:
+    // Auto-proceed immediately without prompting (unless it's an explicit ask_question)
+    const isAlwaysAllow = policy === 'always_proceed' || mode === 'auto' || mode === 'autonomous';
+
+    if (isAlwaysAllow && toolName !== 'ask_question') {
+      sendDecisionAndExit({ decision: 'allow' });
       return;
     }
 
-    if (mode === 'auto') {
-      mode = await getAutoModeResolution();
+    // Read target device preference for forced questions / asks
+    const targetDeviceFile = path.resolve(os.homedir(), '.agy-companion-target');
+    let targetDevice = 'remote';
+    if (fs.existsSync(targetDeviceFile)) {
+      const val = fs.readFileSync(targetDeviceFile, 'utf8').trim().toLowerCase();
+      if (val === 'remote' || val === 'desk') targetDevice = val;
+    } else if (mode === 'desk' || mode === 'remote') {
+      targetDevice = mode;
     }
 
-    // Desk mode: force IDE desktop prompt, ignoring cached 'always allow' permissions
-    if (mode === 'desk') {
-      process.stdout.write(JSON.stringify({ decision: 'force_ask' }));
-      process.exit(0);
+    const effectiveDevice = (mode === 'auto' || mode === 'autonomous') ? targetDevice : mode;
+
+    // DESK MODE: Prompt appears on PC IDE Desktop
+    if (effectiveDevice === 'desk') {
+      sendDecisionAndExit({ decision: 'force_ask' });
       return;
     }
 
-    // Remote mode: push to phone companion and wait for Allow/Deny
+    // REMOTE MODE: Prompt appears ONLY on Phone Companion (ZERO desktop popups)
     const result = await postToDaemon(hookContext);
     if (result && result.decision === 'allow') {
-      const overrides = result.permissionOverrides || (cmd ? [`command(${cmd})`] : []);
-      process.stdout.write(JSON.stringify({ decision: 'allow', permissionOverrides: overrides }));
-      process.exit(0);
+      sendDecisionAndExit({ decision: 'allow' });
       return;
     }
 
-    process.stdout.write(JSON.stringify(result));
-    process.exit(0);
+    // Safety guard: in Remote Mode, NEVER let an 'ask' or 'force_ask' leak to IDE stdout
+    if (result && (result.decision === 'force_ask' || result.decision === 'ask')) {
+      sendDecisionAndExit({
+        decision: 'deny',
+        reason: 'Execution Paused: Waiting for mobile companion approval. Session frozen safely without desktop popup.'
+      });
+      return;
+    }
+
+    sendDecisionAndExit(result);
   } catch (error) {
-    process.stdout.write(JSON.stringify({ decision: 'force_ask', reason: error.message }));
-    process.exit(0);
+    if (mode === 'desk') {
+      sendDecisionAndExit({ decision: 'force_ask', reason: error.message });
+    } else {
+      sendDecisionAndExit({
+        decision: 'deny',
+        reason: `Remote approval paused: ${error.message}. Session held safely.`
+      });
+    }
   }
 }
 
 main();
+`;
