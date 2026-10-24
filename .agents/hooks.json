@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node .agents/interceptor.js",
+            "command": "node ./interceptor.js",
             "timeout": 130
           }
         ]

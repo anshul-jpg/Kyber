@@ -2,6 +2,7 @@
 
 /**
  * Antigravity Companion - PreToolUse Lifecycle Hook
+ * Canonical Single Source of Truth
  *
  * Three-Mode Policy:
  * 1. Remote Mode:
@@ -25,9 +26,9 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-function sendDecisionAndExit(decisionObj) {
+function sendDecisionAndExit(decisionObj, tag = '') {
   try {
-    fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} Hook decision: ${JSON.stringify(decisionObj)}\n`);
+    fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} [${tag}] Hook decision: ${JSON.stringify(decisionObj)}\n`);
   } catch {}
   const json = JSON.stringify(decisionObj) + '\n';
   process.stdout.write(json, () => {
@@ -91,8 +92,8 @@ function postToDaemon(payload, timeoutMs = 130000) {
       resolve({ decision: 'deny', reason: 'Mobile approval timed out (130s). Session held safely without PC modal.' });
     });
 
-    req.on('error', () => {
-      resolve({ decision: 'deny', reason: 'Companion daemon not active on port 4041. Session held safely.' });
+    req.on('error', (err) => {
+      resolve({ decision: 'deny', reason: `Companion daemon not active on port 4041 (${err.message}). Session held safely.` });
     });
 
     req.write(postData);
@@ -106,7 +107,7 @@ async function main() {
     const hookContext = await readStdin();
 
     if (!hookContext.toolCall) {
-      sendDecisionAndExit({ decision: 'allow' });
+      sendDecisionAndExit({ decision: 'allow' }, 'no-toolcall');
       return;
     }
 
@@ -125,32 +126,39 @@ async function main() {
       'manage_task',
     ]);
     if (SAFE_READ_TOOLS.has(toolName)) {
-      sendDecisionAndExit({ decision: 'allow' });
+      sendDecisionAndExit({ decision: 'allow' }, `safe-read-tool:${toolName}`);
       return;
     }
 
-    // 1. Read Global & Local Companion Mode
-    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
+    // 1. Read Local & Global Companion Mode (Local workspace overrides Global)
     const localModeFile = path.resolve(__dirname, 'companion-mode');
-    if (fs.existsSync(globalModeFile)) {
-      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
-    } else if (fs.existsSync(localModeFile)) {
+    const globalModeFile = path.resolve(os.homedir(), '.agy-companion-mode');
+    if (fs.existsSync(localModeFile)) {
       mode = fs.readFileSync(localModeFile, 'utf8').trim().toLowerCase();
+    } else if (fs.existsSync(globalModeFile)) {
+      mode = fs.readFileSync(globalModeFile, 'utf8').trim().toLowerCase();
     }
 
-    // 2. Read Global Execution Policy (Strict / Supervised vs Always Proceed / Autonomous)
+    // 2. Read Local & Global Execution Policy (Local workspace overrides Global)
+    const localPolicyFile = path.resolve(__dirname, 'companion-policy');
     const globalPolicyFile = path.resolve(os.homedir(), '.agy-companion-policy');
     let policy = 'force_ask';
-    if (fs.existsSync(globalPolicyFile)) {
+    if (fs.existsSync(localPolicyFile)) {
+      policy = fs.readFileSync(localPolicyFile, 'utf8').trim().toLowerCase();
+    } else if (fs.existsSync(globalPolicyFile)) {
       policy = fs.readFileSync(globalPolicyFile, 'utf8').trim().toLowerCase();
     }
+
+    try {
+      fs.appendFileSync(path.resolve(__dirname, 'interceptor.log'), `${new Date().toISOString()} Hook invoked: tool=${toolName}, cmd=${cmd.slice(0, 60)}, mode=${mode}, policy=${policy}\n`);
+    } catch {}
 
     // If policy is Always Allow / Always Proceed, or mode is Auto/Autonomous:
     // Auto-proceed immediately without prompting (unless it's an explicit ask_question)
     const isAlwaysAllow = policy === 'always_proceed' || mode === 'auto' || mode === 'autonomous';
 
     if (isAlwaysAllow && toolName !== 'ask_question') {
-      sendDecisionAndExit({ decision: 'allow' });
+      sendDecisionAndExit({ decision: 'allow' }, `always-allow:policy=${policy}:mode=${mode}`);
       return;
     }
 
@@ -168,14 +176,14 @@ async function main() {
 
     // DESK MODE: Prompt appears on PC IDE Desktop
     if (effectiveDevice === 'desk') {
-      sendDecisionAndExit({ decision: 'force_ask' });
+      sendDecisionAndExit({ decision: 'force_ask' }, 'desk-mode');
       return;
     }
 
     // REMOTE MODE: Prompt appears ONLY on Phone Companion (ZERO desktop popups)
     const result = await postToDaemon(hookContext);
     if (result && result.decision === 'allow') {
-      sendDecisionAndExit({ decision: 'allow' });
+      sendDecisionAndExit({ decision: 'allow' }, 'remote-approved');
       return;
     }
 
@@ -184,22 +192,21 @@ async function main() {
       sendDecisionAndExit({
         decision: 'deny',
         reason: 'Execution Paused: Waiting for mobile companion approval. Session frozen safely without desktop popup.'
-      });
+      }, 'remote-guard-deny');
       return;
     }
 
-    sendDecisionAndExit(result);
+    sendDecisionAndExit(result, 'remote-resolved');
   } catch (error) {
     if (mode === 'desk') {
-      sendDecisionAndExit({ decision: 'force_ask', reason: error.message });
+      sendDecisionAndExit({ decision: 'force_ask', reason: error.message }, 'error-desk');
     } else {
       sendDecisionAndExit({
         decision: 'deny',
         reason: `Remote approval paused: ${error.message}. Session held safely.`
-      });
+      }, 'error-remote');
     }
   }
 }
 
 main();
-`;
