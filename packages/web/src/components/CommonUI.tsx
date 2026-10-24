@@ -46,11 +46,46 @@ export function CopyButton({ text }: { text: string }) {
   );
 }
 
+// Configure marked extension to escape raw HTML and secure markdown links
+marked.use({
+  walkTokens(token: any) {
+    if (token.type === 'html') {
+      token.text = token.text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    } else if (token.type === 'link') {
+      if (token.href && /^\s*javascript:/i.test(token.href)) {
+        token.href = '#';
+      }
+    }
+  },
+  renderer: {
+    link({ href, title, text }: { href: string; title?: string | null; text: string }) {
+      const safeHref = href && !/^\s*javascript:/i.test(href) ? href : '#';
+      const titleAttr = title ? ` title="${title}"` : '';
+      return `<a href="${safeHref}" target="_blank" rel="noopener noreferrer"${titleAttr}>${text}</a>`;
+    },
+  },
+});
+
+function sanitizeMarkdownHtml(rawHtml: string): string {
+  return rawHtml
+    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+    .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
+    .replace(/<object\b[^<]*(?:(?!<\/object>)<[^<]*)*<\/object>/gi, '')
+    .replace(/<embed\b[^<]*(?:(?!<\/embed>)<[^<]*)*<\/embed>/gi, '')
+    .replace(/\bon\w+\s*=\s*(['"]).*?\1/gi, '')
+    .replace(/\bon\w+\s*=\s*[^>\s]+/gi, '')
+    .replace(/href\s*=\s*(['"])\s*javascript:[^'"]*\1/gi, 'href="#"');
+}
+
 // --- High-Fidelity Markdown Formatter ---
 export const MarkdownContent = React.memo(function MarkdownContent({ content }: { content: string }) {
   const html = useMemo(() => {
     try {
-      return marked.parse(content, { gfm: true, breaks: true }) as string;
+      const parsed = marked.parse(content, { gfm: true, breaks: true }) as string;
+      return sanitizeMarkdownHtml(parsed);
     } catch {
       return content;
     }

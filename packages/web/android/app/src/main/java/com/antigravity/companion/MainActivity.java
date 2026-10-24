@@ -132,6 +132,27 @@ public class MainActivity extends BridgeActivity {
         updatePersistentNotification(title, content, requestId, isAlert, null);
     }
 
+    @JavascriptInterface
+    public void setActiveHost(String host, String port) {
+        setActiveHost(host, port, null);
+    }
+
+    @JavascriptInterface
+    public void setActiveHost(String host, String port, String token) {
+        try {
+            android.content.SharedPreferences.Editor editor = getSharedPreferences("kyber_companion", MODE_PRIVATE)
+                .edit()
+                .putString("active_host", host)
+                .putString("active_port", port != null ? port : "4040");
+            if (token != null && !token.trim().isEmpty()) {
+                editor.putString("active_token", token.trim());
+            }
+            editor.apply();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     public void notifyApprovalResolved(String requestId, String decision) {
         runOnUiThread(() -> {
             if (getBridge() != null && getBridge().getWebView() != null) {

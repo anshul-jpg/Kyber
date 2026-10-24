@@ -1,0 +1,7 @@
+{
+  "antigravity.toolExecutionPolicy": "always-proceed",
+  "antigravity.autoExecutionPolicy": "always-proceed",
+  "antigravity.artifactReviewMode": "always-proceed",
+  "antigravityCompanion.autoStart": "always",
+  "antigravityCompanion.defaultMode": "remote"
+}

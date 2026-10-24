@@ -13,9 +13,12 @@ import android.os.IBinder;
 import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
+import android.content.SharedPreferences;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.List;
 
 public class CompanionForegroundService extends Service {
     public static final String CHANNEL_ID = "antigravity_companion_channel_v3";
@@ -182,11 +185,26 @@ public class CompanionForegroundService extends Service {
 
     private void resolveDecision(String requestId, String decision) {
         new Thread(() -> {
-            String[] endpoints = new String[] {
-                "http://127.0.0.1:4040/api/hook/approval",
-                "http://100.107.129.104:4040/api/hook/approval",
-                "http://127.0.0.1:4041/api/hook/approval"
-            };
+            List<String> endpoints = new ArrayList<>();
+            try {
+                SharedPreferences prefs = getSharedPreferences("kyber_companion", MODE_PRIVATE);
+                String savedHost = prefs.getString("active_host", null);
+                String savedPort = prefs.getString("active_port", "4040");
+                String savedToken = prefs.getString("active_token", null);
+                if (savedHost != null && !savedHost.trim().isEmpty()) {
+                    String clean = savedHost.trim();
+                    if (clean.startsWith("http://") || clean.startsWith("https://")) {
+                        endpoints.add(clean.replaceAll("/$", "") + "/api/hook/approval");
+                    } else {
+                        endpoints.add("http://" + clean + ":" + savedPort + "/api/hook/approval");
+                    }
+                }
+            } catch (Exception ignored) {}
+
+            endpoints.add("http://100.107.129.104:4040/api/hook/approval");
+            endpoints.add("http://127.0.0.1:4040/api/hook/approval");
+            endpoints.add("http://127.0.0.1:4041/api/hook/approval");
+
             for (String ep : endpoints) {
                 try {
                     URL url = new URL(ep);
@@ -195,6 +213,13 @@ public class CompanionForegroundService extends Service {
                     conn.setConnectTimeout(3000);
                     conn.setReadTimeout(5000);
                     conn.setRequestProperty("Content-Type", "application/json");
+                    try {
+                        SharedPreferences p = getSharedPreferences("kyber_companion", MODE_PRIVATE);
+                        String token = p.getString("active_token", null);
+                        if (token != null && !token.trim().isEmpty()) {
+                            conn.setRequestProperty("Authorization", "Bearer " + token.trim());
+                        }
+                    } catch (Exception ignored) {}
                     conn.setDoOutput(true);
 
                     String json = "{\"requestId\":\"" + requestId + "\",\"decision\":\"" + decision + "\"}";

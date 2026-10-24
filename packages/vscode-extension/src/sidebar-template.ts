@@ -16,8 +16,8 @@ export interface SidebarRenderContext {
   qrSvg: string;
 }
 
-function escapeHtml(str: string): string {
-  return str
+function escapeHtml(str: string | undefined | null): string {
+  return (str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -588,7 +588,7 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
       Desk (PC)
     </button>
     <button class="mode-btn ${mode === 'auto' ? 'active' : ''}" onclick="sendMsg('setMode', { mode: 'auto' })">
-      Auto ${mode === 'auto' ? `(${effectiveMode === 'remote' ? 'Phone' : 'PC'})` : ''}
+      Auto
     </button>
   </div>
 

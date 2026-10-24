@@ -15,8 +15,10 @@ import {
   RefreshCw,
   Zap,
   Check,
+  Power,
+  Cpu,
 } from 'lucide-react';
-import { CompanionMode, ExecutionPolicy, WorkspaceState } from '@agy-companion/protocol';
+import { CompanionMode, ExecutionPolicy, WorkspaceState, HostTelemetry } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
 
 interface HeaderProps {
@@ -45,6 +47,11 @@ interface HeaderProps {
   workspaces?: WorkspaceState[];
   activeWorkspaceId?: string;
   onSelectWorkspace?: (id: string) => void;
+  recentProjects?: import('@agy-companion/protocol').RecentProject[];
+  onLaunchRecentProject?: (path: string) => void;
+  hostTelemetry?: HostTelemetry | null;
+  onCloseIde?: (providerId?: string) => void;
+  onRestartIde?: (providerId?: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -73,6 +80,11 @@ export const Header: React.FC<HeaderProps> = ({
   workspaces = [],
   activeWorkspaceId,
   onSelectWorkspace,
+  recentProjects = [],
+  onLaunchRecentProject,
+  hostTelemetry = null,
+  onCloseIde,
+  onRestartIde,
 }) => {
   const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
   const activeWs = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
@@ -97,22 +109,28 @@ export const Header: React.FC<HeaderProps> = ({
         }}
       >
         {/* Left: Active Workspace Pill / Multi-Window Switcher */}
-        <div style={{ position: 'relative', maxWidth: '55%' }}>
+        <div style={{ position: 'relative', maxWidth: '62%', minWidth: 0, flexShrink: 1 }}>
           <div
             onClick={() => {
-              setShowWorkspaceDropdown(prev => !prev);
+              const next = !showWorkspaceDropdown;
+              setShowWorkspaceDropdown(next);
+              if (next) {
+                setShowOptionsDropdown(false);
+              }
               triggerHaptic(20);
             }}
             style={{
-              display: 'flex',
+              display: 'inline-flex',
               alignItems: 'center',
-              gap: '6px',
+              gap: '7px',
               cursor: 'pointer',
               background: showWorkspaceDropdown ? '#252528' : 'rgba(255, 255, 255, 0.04)',
               border: '1px solid rgba(255, 255, 255, 0.08)',
-              padding: '4px 10px',
+              padding: '5px 10px',
               borderRadius: '8px',
-              transition: 'background 120ms ease',
+              transition: 'all 120ms ease',
+              maxWidth: '100%',
+              userSelect: 'none',
             }}
           >
             <div
@@ -124,8 +142,16 @@ export const Header: React.FC<HeaderProps> = ({
                   activeWs?.status === 'waiting_approval'
                     ? '#f59e0b'
                     : activeWs?.status === 'busy'
-                    ? '#007acc'
+                    ? '#0078d4'
+                    : ideStatus === 'dormant'
+                    ? '#f59e0b'
                     : '#10b981',
+                boxShadow:
+                  ideStatus === 'dormant'
+                    ? '0 0 6px rgba(245, 158, 11, 0.5)'
+                    : activeWs?.status === 'busy'
+                    ? '0 0 6px rgba(0, 120, 212, 0.5)'
+                    : '0 0 6px rgba(16, 185, 129, 0.4)',
                 flexShrink: 0,
               }}
             />
@@ -137,6 +163,7 @@ export const Header: React.FC<HeaderProps> = ({
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                letterSpacing: '-0.01em',
               }}
             >
               {activeWs?.name || (!hasMessages ? 'Agent' : conversationTitle)}
@@ -176,12 +203,43 @@ export const Header: React.FC<HeaderProps> = ({
                   gap: '2px',
                 }}
               >
+                {/* IDE Session Status Banner inside dropdown */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '7px 9px',
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    borderRadius: '7px',
+                    fontSize: '11px',
+                    marginBottom: '4px',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                  }}
+                >
+                  <span style={{ color: '#858585', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span
+                      style={{
+                        width: '6px',
+                        height: '6px',
+                        borderRadius: '50%',
+                        background: ideStatus === 'dormant' ? '#f59e0b' : '#10b981',
+                        boxShadow: ideStatus === 'dormant' ? '0 0 5px rgba(245, 158, 11, 0.5)' : '0 0 5px rgba(16, 185, 129, 0.4)',
+                      }}
+                    />
+                    IDE Session
+                  </span>
+                  <span style={{ color: ideStatus === 'dormant' ? '#fbbf24' : '#10b981', fontWeight: 600 }}>
+                    {ideStatus === 'dormant' ? 'Dormant (Buffering)' : 'Active & Synced'}
+                  </span>
+                </div>
+
                 <div
                   style={{
                     fontSize: '10px',
                     fontWeight: 700,
                     color: '#71717a',
-                    padding: '6px 8px 4px 8px',
+                    padding: '4px 8px 3px 8px',
                     letterSpacing: '0.06em',
                     textTransform: 'uppercase',
                   }}
@@ -263,225 +321,196 @@ export const Header: React.FC<HeaderProps> = ({
                   </div>
                 )}
 
-                <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '4px 0' }} />
+                {recentProjects && recentProjects.filter(p => !p.isOpen).length > 0 && (
+                  <>
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: '#71717a',
+                        padding: '8px 8px 3px 8px',
+                        letterSpacing: '0.06em',
+                        textTransform: 'uppercase',
+                        borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                        marginTop: '4px',
+                      }}
+                    >
+                      Recent Projects ({recentProjects.filter(p => !p.isOpen).length})
+                    </div>
+                    <div style={{ maxHeight: '160px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                      {recentProjects
+                        .filter(p => !p.isOpen)
+                        .map(p => (
+                          <div
+                            key={p.path}
+                            onClick={() => {
+                              onLaunchRecentProject?.(p.path);
+                              setShowWorkspaceDropdown(false);
+                              triggerHaptic(25);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 8px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              color: '#d4d4d8',
+                              fontSize: '12px',
+                              background: 'transparent',
+                              transition: 'background 120ms ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                              <Folder size={12} color="#71717a" style={{ flexShrink: 0 }} />
+                              <div style={{ minWidth: 0, flex: 1 }}>
+                                <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                                  {p.name}
+                                </div>
+                                <div style={{ fontSize: '9.5px', color: '#71717a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {p.path}
+                                </div>
+                              </div>
+                            </div>
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                color: '#0078d4',
+                                background: 'rgba(0, 120, 212, 0.12)',
+                                border: '1px solid rgba(0, 120, 212, 0.25)',
+                                padding: '2px 6px',
+                                borderRadius: '4px',
+                                fontWeight: 600,
+                                flexShrink: 0,
+                                marginLeft: '6px',
+                              }}
+                            >
+                              Launch
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </>
+                )}
 
-                <div
-                  onClick={() => {
-                    setShowWorkspaceDropdown(false);
-                    onToggleExplorer();
-                    triggerHaptic(20);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '7px 10px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    color: '#cbd5e1',
-                    fontSize: '12px',
-                  }}
-                >
-                  <Folder size={14} color="#007acc" />
-                  <span>Browse Workspace Files</span>
-                </div>
-
-                <div
-                  onClick={() => {
-                    setShowWorkspaceDropdown(false);
-                    onNewChat();
-                    triggerHaptic(20);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '7px 10px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    color: '#cbd5e1',
-                    fontSize: '12px',
-                  }}
-                >
-                  <Plus size={14} color="#10b981" />
-                  <span>New Conversation</span>
-                </div>
-
-                <div
-                  onClick={() => {
-                    setShowWorkspaceDropdown(false);
-                    onOpenHistory();
-                    triggerHaptic(20);
-                  }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    padding: '7px 10px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    color: '#cbd5e1',
-                    fontSize: '12px',
-                  }}
-                >
-                  <History size={14} color="#858585" />
-                  <span>Conversation History</span>
-                </div>
               </div>
             </>
           )}
         </div>
 
-        {/* In-App Update Progress / Update Available Pill */}
-        {apkUpdateProgress?.inProgress ? (
+        {/* If IDE is Dormant: Compact warning chip */}
+        {ideStatus === 'dormant' && (
           <div
+            title="Antigravity IDE window is closed or reloading. Tap to launch and reconnect."
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '5px',
-              padding: '3px 8px',
-              borderRadius: '12px',
-              background: 'rgba(0, 122, 204, 0.15)',
-              border: '1px solid rgba(0, 122, 204, 0.35)',
-              fontSize: '11px',
-              fontWeight: 500,
-              color: '#38bdf8',
-              marginRight: '6px',
+              gap: '4px',
+              padding: '2px 7px',
+              borderRadius: '6px',
+              background: 'rgba(245, 158, 11, 0.12)',
+              border: '1px solid rgba(245, 158, 11, 0.28)',
+              fontSize: '10.5px',
+              fontWeight: 600,
+              color: '#fbbf24',
               flexShrink: 0,
+              userSelect: 'none',
+              marginLeft: '6px',
+              cursor: onRestartIde ? 'pointer' : 'default',
             }}
-          >
-            <RefreshCw size={11} className="animate-spin" />
-            <span>Updating {apkUpdateProgress.percent}%</span>
-          </div>
-        ) : apkUpdateAvailable ? (
-          <button
             onClick={() => {
-              onInstallApk();
-              triggerHaptic(30);
-            }}
-            title="A new APK build is ready. Tap to install directly."
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '5px',
-              padding: '3px 8px',
-              borderRadius: '12px',
-              background: 'rgba(56, 189, 248, 0.12)',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
-              fontSize: '11px',
-              fontWeight: 500,
-              color: '#38bdf8',
-              marginRight: '6px',
-              cursor: 'pointer',
-              flexShrink: 0,
+              if (onRestartIde) {
+                triggerHaptic(30);
+                onRestartIde();
+              }
             }}
           >
-            <Download size={11} />
-            <span>Update APK</span>
-          </button>
-        ) : null}
-
-        {/* Center/Right: IDE Status Indicator Badge */}
-        <div
-          title={ideStatus === 'dormant' ? 'Antigravity IDE window is closed or reloading. Messages will buffer safely in daemon memory.' : 'Antigravity IDE is connected and active. Turns execute immediately.'}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '5px',
-            padding: '3px 8px',
-            borderRadius: '12px',
-            background: ideStatus === 'dormant' ? 'rgba(245, 158, 11, 0.1)' : 'rgba(255, 255, 255, 0.04)',
-            border: `1px solid ${ideStatus === 'dormant' ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.08)'}`,
-            fontSize: '11px',
-            fontWeight: 500,
-            color: ideStatus === 'dormant' ? '#fbbf24' : '#9ca3af',
-            marginLeft: 'auto',
-            marginRight: '6px',
-            flexShrink: 0,
-            userSelect: 'none',
-          }}
-        >
-          <span
-            style={{
-              width: '6px',
-              height: '6px',
-              borderRadius: '50%',
-              background: ideStatus === 'dormant' ? '#f59e0b' : '#4ade80',
-              boxShadow: ideStatus === 'dormant' ? '0 0 5px rgba(245, 158, 11, 0.5)' : '0 0 5px rgba(74, 222, 128, 0.5)',
-            }}
-          />
-          <span style={{ letterSpacing: '-0.01em' }}>
-            {ideStatus === 'dormant' ? 'IDE Dormant' : 'IDE Active'}
-          </span>
-        </div>
+            <span
+              style={{
+                width: '5px',
+                height: '5px',
+                borderRadius: '50%',
+                background: '#f59e0b',
+                boxShadow: '0 0 5px rgba(245, 158, 11, 0.6)',
+              }}
+            />
+            <span style={{ letterSpacing: '0.01em' }}>Dormant · Launch</span>
+          </div>
+        )}
 
         {/* Right Header Icons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {/* [+] New Chat */}
-          <button
-            onClick={() => {
-              onNewChat();
-              triggerHaptic(25);
-            }}
-            title="New Conversation"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#cccccc',
-              width: '34px',
-              height: '34px',
-              borderRadius: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <Plus size={16} />
-          </button>
-
-          {/* [🕒] History Drawer */}
-          <button
-            onClick={() => {
-              onOpenHistory();
-              triggerHaptic(25);
-            }}
-            title="Session History"
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#cccccc',
-              width: '34px',
-              height: '34px',
-              borderRadius: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <History size={16} />
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginLeft: 'auto', flexShrink: 0 }}>
+          {/* In-App Update Progress / Update Available Pill */}
+          {apkUpdateProgress?.inProgress ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '3px 7px',
+                borderRadius: '6px',
+                background: 'rgba(0, 122, 204, 0.15)',
+                border: '1px solid rgba(0, 122, 204, 0.35)',
+                fontSize: '10.5px',
+                fontWeight: 600,
+                color: '#38bdf8',
+                marginRight: '3px',
+              }}
+            >
+              <RefreshCw size={10} className="animate-spin" />
+              <span>{apkUpdateProgress.percent}%</span>
+            </div>
+          ) : apkUpdateAvailable ? (
+            <button
+              onClick={() => {
+                onInstallApk();
+                triggerHaptic(30);
+              }}
+              title="A new APK build is ready. Tap to install directly."
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '3px 7px',
+                borderRadius: '6px',
+                background: 'rgba(56, 189, 248, 0.12)',
+                border: '1px solid rgba(56, 189, 248, 0.3)',
+                fontSize: '10.5px',
+                fontWeight: 600,
+                color: '#38bdf8',
+                marginRight: '3px',
+                cursor: 'pointer',
+              }}
+            >
+              <Download size={11} />
+              <span>Update</span>
+            </button>
+          ) : null}
 
           {/* [...] More Options */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => {
-                setShowOptionsDropdown(!showOptionsDropdown);
+                const next = !showOptionsDropdown;
+                setShowOptionsDropdown(next);
+                if (next) {
+                  setShowWorkspaceDropdown(false);
+                }
                 triggerHaptic(20);
               }}
               title="More Options"
               style={{
-                background: 'transparent',
+                background: showOptionsDropdown ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
                 border: 'none',
                 color: '#cccccc',
-                width: '34px',
-                height: '34px',
-                borderRadius: '6px',
+                width: '36px',
+                height: '36px',
+                borderRadius: '7px',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
+                transition: 'background 120ms ease',
               }}
             >
               <MoreHorizontal size={16} />
@@ -489,21 +518,80 @@ export const Header: React.FC<HeaderProps> = ({
 
             {/* Dropdown Menu */}
             {showOptionsDropdown && (
-              <div
-                style={{
-                  position: 'absolute',
-                  top: '40px',
-                  right: 0,
-                  background: '#1e1e1e',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                  borderRadius: '8px',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                  width: '210px',
-                  zIndex: 100,
-                  overflow: 'hidden',
-                  padding: '4px',
-                }}
-              >
+              <>
+                <div
+                  onClick={() => setShowOptionsDropdown(false)}
+                  style={{ position: 'fixed', inset: 0, zIndex: 90 }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: '40px',
+                    right: 0,
+                    background: '#1e1e1e',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                    width: '210px',
+                    zIndex: 95,
+                    overflow: 'hidden',
+                    padding: '4px',
+                  }}
+                >
+                {/* New Conversation */}
+                <button
+                  onClick={() => {
+                    onNewChat();
+                    setShowOptionsDropdown(false);
+                    triggerHaptic(20);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '12.5px',
+                    color: '#ededed',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Plus size={14} color="#10b981" />
+                  <span>New Conversation</span>
+                </button>
+
+                {/* Session History */}
+                <button
+                  onClick={() => {
+                    onOpenHistory();
+                    setShowOptionsDropdown(false);
+                    triggerHaptic(20);
+                  }}
+                  style={{
+                    width: '100%',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    fontSize: '12.5px',
+                    color: '#ededed',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <History size={14} color="#858585" />
+                  <span>Session History</span>
+                </button>
+
+                <div style={{ height: '1px', background: 'rgba(255, 255, 255, 0.08)', margin: '3px 0' }} />
+
                 {/* File Explorer Toggle */}
                 <button
                   onClick={() => {
@@ -534,21 +622,21 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   onClick={() => {
                     triggerHaptic(20);
-                    const isAutonomous =
+                    const isAuto =
+                      companionMode === 'auto' ||
                       companionMode === 'autonomous' ||
-                      (companionMode === 'remote' && executionPolicy === 'always_proceed');
+                      executionPolicy === 'always_proceed';
 
-                    if (companionMode === 'remote' || companionMode === 'autonomous') {
-                      if (!isAutonomous) {
-                        // Remote Supervised -> Remote Autonomous
-                        if (onTogglePolicy) onTogglePolicy('always_proceed');
-                        onToggleMode('remote');
-                      } else {
-                        // Remote Autonomous -> Desk
-                        onToggleMode('desk');
-                      }
+                    if (companionMode === 'remote' && !isAuto) {
+                      // Remote -> Auto (Proceed)
+                      if (onTogglePolicy) onTogglePolicy('always_proceed');
+                      onToggleMode('auto');
+                    } else if (isAuto) {
+                      // Auto -> Desk
+                      if (onTogglePolicy) onTogglePolicy('force_ask');
+                      onToggleMode('desk');
                     } else {
-                      // Desk -> Remote Supervised
+                      // Desk -> Remote
                       if (onTogglePolicy) onTogglePolicy('force_ask');
                       onToggleMode('remote');
                     }
@@ -569,66 +657,40 @@ export const Header: React.FC<HeaderProps> = ({
                     textAlign: 'left',
                   }}
                 >
-                  {companionMode === 'autonomous' ||
-                  (companionMode === 'remote' && executionPolicy === 'always_proceed') ? (
+                  {companionMode === 'auto' ||
+                  companionMode === 'autonomous' ||
+                  executionPolicy === 'always_proceed' ? (
                     <Zap size={14} color="#eab308" />
-                  ) : companionMode === 'remote' ? (
-                    <Smartphone size={14} color="#007acc" />
                   ) : companionMode === 'desk' ? (
                     <Laptop size={14} color="#4ade80" />
                   ) : (
-                    <Radio size={14} color="#38bdf8" />
+                    <Smartphone size={14} color="#007acc" />
                   )}
                   <span
                     style={{
                       color:
+                        companionMode === 'auto' ||
                         companionMode === 'autonomous' ||
-                        (companionMode === 'remote' && executionPolicy === 'always_proceed')
+                        executionPolicy === 'always_proceed'
                           ? '#eab308'
                           : '#ededed',
                       fontWeight:
+                        companionMode === 'auto' ||
                         companionMode === 'autonomous' ||
-                        (companionMode === 'remote' && executionPolicy === 'always_proceed')
+                        executionPolicy === 'always_proceed'
                           ? 600
                           : 400,
                     }}
                   >
                     Mode:{' '}
-                    {companionMode === 'autonomous' ||
-                    (companionMode === 'remote' && executionPolicy === 'always_proceed')
-                      ? 'Remote · Auto'
-                      : companionMode === 'remote'
-                      ? 'Remote · Ask'
+                    {companionMode === 'auto' ||
+                    companionMode === 'autonomous' ||
+                    executionPolicy === 'always_proceed'
+                      ? 'Auto (Proceed)'
                       : companionMode === 'desk'
                       ? 'Desk (PC)'
-                      : 'Auto'}
+                      : 'Remote (Phone)'}
                   </span>
-                </button>
-
-                {/* Emergency Stop / Kill Switch */}
-                <button
-                  onClick={() => {
-                    onEmergencyStop();
-                    setShowOptionsDropdown(false);
-                  }}
-                  style={{
-                    width: '100%',
-                    background: 'rgba(241, 76, 76, 0.1)',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '8px 10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '12.5px',
-                    color: '#f87171',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    marginTop: '2px',
-                  }}
-                >
-                  <OctagonAlert size={14} />
-                  <span>Emergency Stop</span>
                 </button>
 
                 {/* Settings */}
@@ -688,36 +750,9 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 </button>
               </div>
-            )}
+            </>
+          )}
           </div>
-
-          {/* [✕] Close / Minimize App */}
-          <button
-            onClick={() => {
-              if ((window as any).AndroidHost?.minimizeApp) {
-                (window as any).AndroidHost.minimizeApp();
-              } else {
-                onNewChat();
-              }
-              setShowOptionsDropdown(false);
-              triggerHaptic(20);
-            }}
-            title={isNativeApp ? "Minimize to Background" : "Reset Session"}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#cccccc',
-              width: '34px',
-              height: '34px',
-              borderRadius: '6px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-            }}
-          >
-            <X size={16} />
-          </button>
         </div>
       </header>
 

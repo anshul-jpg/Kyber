@@ -14,8 +14,12 @@ import {
   Clock,
   Gauge,
   Bot,
+  Power,
+  Cpu,
+  AlertTriangle,
+  OctagonAlert,
 } from 'lucide-react';
-import { decodePairingTicket, ExecutionPolicy, CompanionMode, AgentQuota } from '@agy-companion/protocol';
+import { decodePairingTicket, ExecutionPolicy, CompanionMode, AgentQuota, HostTelemetry } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
 
 export interface SettingsModalProps {
@@ -31,14 +35,18 @@ export interface SettingsModalProps {
   companionMode: CompanionMode;
   onUpdateCompanionMode: (mode: CompanionMode) => void;
   agentQuotas?: AgentQuota[];
+  hostTelemetry?: HostTelemetry | null;
+  onCloseIde?: (providerId?: string) => void;
+  onRestartIde?: (providerId?: string) => void;
+  onEmergencyStop?: () => void;
 }
 
 const DEFAULT_QUOTAS: AgentQuota[] = [
   {
-    id: 'gemini-3.8-flash',
+    id: 'gemini-3.8-flash-high',
     name: 'Gemini 3.8 Flash (High)',
     provider: 'Google',
-    badge: 'Default Agent',
+    badge: 'Primary Fast',
     isActive: true,
     usedPercent: 22,
     usedUnits: 33,
@@ -49,44 +57,86 @@ const DEFAULT_QUOTAS: AgentQuota[] = [
     status: 'optimal',
   },
   {
-    id: 'gemini-2.5-pro',
-    name: 'Gemini 2.5 Pro',
+    id: 'gemini-3.8-flash-mid',
+    name: 'Gemini 3.8 Flash (Mid)',
     provider: 'Google',
-    badge: 'Deep Reasoning',
+    badge: 'Balanced',
     isActive: false,
-    usedPercent: 36,
+    usedPercent: 12,
     usedUnits: 18,
-    totalUnits: 50,
+    totalUnits: 150,
     unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 2 * 3600 * 1000 + 14 * 60 * 1000 + 5 * 1000,
+    resetTimestamp: Date.now() + 55 * 60 * 1000,
+    resetWindowText: '1h rolling window',
+    status: 'optimal',
+  },
+  {
+    id: 'gemini-3.8-flash-low',
+    name: 'Gemini 3.8 Flash (Low)',
+    provider: 'Google',
+    badge: 'Efficiency',
+    isActive: false,
+    usedPercent: 5,
+    usedUnits: 5,
+    totalUnits: 200,
+    unitLabel: 'reqs',
+    resetTimestamp: Date.now() + 58 * 60 * 1000,
+    resetWindowText: '1h rolling window',
+    status: 'optimal',
+  },
+  {
+    id: 'claude-opus-4.5',
+    name: 'Claude Opus 4.5',
+    provider: 'Anthropic',
+    badge: 'Deep Architecture',
+    isActive: false,
+    usedPercent: 40,
+    usedUnits: 16,
+    totalUnits: 40,
+    unitLabel: 'reqs',
+    resetTimestamp: Date.now() + 3 * 3600 * 1000 + 20 * 60 * 1000,
     resetWindowText: '5h rolling window',
     status: 'optimal',
   },
   {
-    id: 'claude-3.5-sonnet',
-    name: 'Claude 3.5 Sonnet',
+    id: 'claude-sonnet-4.5',
+    name: 'Claude Sonnet 4.5',
     provider: 'Anthropic',
     badge: 'High Craft',
     isActive: false,
-    usedPercent: 62,
-    usedUnits: 28,
+    usedPercent: 55,
+    usedUnits: 25,
     totalUnits: 45,
     unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 3 * 3600 * 1000 + 41 * 60 * 1000 + 50 * 1000,
+    resetTimestamp: Date.now() + 2 * 3600 * 1000 + 40 * 60 * 1000,
     resetWindowText: '5h rolling window',
-    status: 'moderate',
+    status: 'optimal',
   },
   {
-    id: 'gpt-4o',
-    name: 'GPT-4o (Codex)',
+    id: 'gpt-4.5',
+    name: 'GPT-4.5',
     provider: 'OpenAI',
-    badge: 'Universal',
+    badge: 'Frontier Reasoning',
     isActive: false,
-    usedPercent: 22,
-    usedUnits: 18,
+    usedPercent: 20,
+    usedUnits: 10,
+    totalUnits: 50,
+    unitLabel: 'reqs',
+    resetTimestamp: Date.now() + 1 * 3600 * 1000 + 15 * 60 * 1000,
+    resetWindowText: '3h rolling window',
+    status: 'optimal',
+  },
+  {
+    id: 'gpt-oss',
+    name: 'GPT OSS',
+    provider: 'OpenAI',
+    badge: 'Open Weights',
+    isActive: false,
+    usedPercent: 10,
+    usedUnits: 8,
     totalUnits: 80,
     unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 1 * 3600 * 1000 + 5 * 60 * 1000 + 12 * 1000,
+    resetTimestamp: Date.now() + 1 * 3600 * 1000 + 5 * 60 * 1000,
     resetWindowText: '3h rolling window',
     status: 'optimal',
   },
@@ -117,10 +167,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   companionMode,
   onUpdateCompanionMode,
   agentQuotas,
+  hostTelemetry = null,
+  onCloseIde,
+  onRestartIde,
+  onEmergencyStop,
 }) => {
   const [ticketInput, setTicketInput] = useState<string>('');
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
   const [batteryFeedback, setBatteryFeedback] = useState<string | null>(null);
+  const [wolMac, setWolMac] = useState<string>(() => localStorage.getItem('agy_wol_mac') || '');
+  const [wolBroadcast, setWolBroadcast] = useState<string>(() => localStorage.getItem('agy_wol_broadcast') || '255.255.255.255');
+  const [wolPort, setWolPort] = useState<string>(() => localStorage.getItem('agy_wol_port') || '9');
+  const [wolFeedback, setWolFeedback] = useState<string | null>(null);
 
   const [now, setNow] = useState<number>(Date.now());
   useEffect(() => {
@@ -140,7 +198,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
       const targetHost = host || window.location.hostname || '127.0.0.1';
       const targetPort = port || '4040';
-      const res = await fetch(`${proto}//${targetHost}:${targetPort}/api/agent-quotas`);
+      const token = typeof window !== 'undefined' ? localStorage.getItem('agy_token') : null;
+      const res = await fetch(`${proto}//${targetHost}:${targetPort}/api/agent-quotas`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.quotas && data.quotas.length > 0) {
@@ -1055,6 +1116,302 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             {batteryFeedback && (
               <span style={{ fontSize: '11px', color: '#4ade80', textAlign: 'center' }}>
                 {batteryFeedback}
+              </span>
+            )}
+          </div>
+        </section>
+
+        {/* Section 6: Hardware & Power Controls (Advanced / Experimental) */}
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+              <h3
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: '#ef4444',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  margin: 0,
+                }}
+              >
+                Hardware & Power Controls (Advanced / Experimental)
+              </h3>
+              <span
+                style={{
+                  fontSize: '9.5px',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  color: '#f87171',
+                  padding: '1px 6px',
+                  borderRadius: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                Proceed with caution
+              </span>
+            </div>
+            <p style={{ fontSize: '11.5px', color: '#a0a0a0', margin: 0, lineHeight: '1.4' }}>
+              Low-level host power states, Wake-on-LAN magic packet routing, and IDE process lifecycle.
+            </p>
+          </div>
+
+          <div
+            style={{
+              background: 'rgba(239, 68, 68, 0.03)',
+              border: '1px solid rgba(239, 68, 68, 0.22)',
+              borderRadius: '8px',
+              padding: '14px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px',
+            }}
+          >
+            {/* Host Hardware Memory Telemetry */}
+            {hostTelemetry && (
+              <div
+                style={{
+                  padding: '9px 12px',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  borderRadius: '6px',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '5px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11.5px' }}>
+                  <span style={{ color: '#a1a1aa', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Cpu size={13} color="#0078d4" />
+                    Host Physical RAM
+                  </span>
+                  <span
+                    style={{
+                      fontWeight: 600,
+                      color: hostTelemetry.usedMemPercent > 85 ? '#f87171' : '#ffffff',
+                      fontFamily: 'Geist Mono, monospace',
+                    }}
+                  >
+                    {(hostTelemetry.usedMemMb / 1024).toFixed(1)} / {(hostTelemetry.totalMemMb / 1024).toFixed(1)} GB ({hostTelemetry.usedMemPercent}%)
+                  </span>
+                </div>
+                <div style={{ width: '100%', height: '3px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      width: `${hostTelemetry.usedMemPercent}%`,
+                      height: '100%',
+                      background: hostTelemetry.usedMemPercent > 85 ? '#ef4444' : hostTelemetry.usedMemPercent > 70 ? '#f59e0b' : '#10b981',
+                      borderRadius: '2px',
+                      transition: 'width 250ms ease',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Emergency Stop Button */}
+            <button
+              type="button"
+              onClick={() => {
+                triggerHaptic(50);
+                onEmergencyStop?.();
+                setWolFeedback('Emergency Stop sent: pending approvals denied & agent halted');
+                setTimeout(() => setWolFeedback(null), 4000);
+              }}
+              style={{
+                width: '100%',
+                background: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                borderRadius: '6px',
+                padding: '10px 14px',
+                color: '#f87171',
+                fontSize: '12.5px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                minHeight: '42px',
+                boxSizing: 'border-box',
+              }}
+            >
+              <OctagonAlert size={15} color="#ef4444" />
+              <span>Emergency Stop (Halt Agent & Deny Approvals)</span>
+            </button>
+
+            {/* Host Lifecycle Actions */}
+            <div style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(30);
+                  onRestartIde?.();
+                  setWolFeedback('Dispatched restart command to host IDE');
+                  setTimeout(() => setWolFeedback(null), 3500);
+                }}
+                style={{
+                  flex: 1,
+                  background: '#242424',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '6px',
+                  padding: '9px 12px',
+                  color: '#38bdf8',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  minHeight: '40px',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <RotateCw size={13} color="#38bdf8" />
+                <span>Restart IDE</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(40);
+                  onCloseIde?.();
+                  setWolFeedback('Terminated IDE process tree. ~1.5 GB RAM freed on host.');
+                  setTimeout(() => setWolFeedback(null), 4000);
+                }}
+                style={{
+                  flex: 1,
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  borderRadius: '6px',
+                  padding: '9px 12px',
+                  color: '#fca5a5',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  minHeight: '40px',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <Power size={13} color="#f87171" />
+                <span>Close IDE (Free RAM)</span>
+              </button>
+            </div>
+
+            {/* Wake-on-LAN Settings */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%', boxSizing: 'border-box' }}>
+              <label style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>
+                Target Host MAC Address:
+              </label>
+              <input
+                type="text"
+                value={wolMac}
+                onChange={e => {
+                  setWolMac(e.target.value);
+                  localStorage.setItem('agy_wol_mac', e.target.value);
+                }}
+                placeholder="e.g. 00:1A:2B:3C:4D:5E"
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  minWidth: 0,
+                  background: '#141414',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontFamily: 'Geist Mono, monospace',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px', width: '100%', boxSizing: 'border-box' }}>
+              <div style={{ flex: '3', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>
+                  Broadcast IP:
+                </label>
+                <input
+                  type="text"
+                  value={wolBroadcast}
+                  onChange={e => {
+                    setWolBroadcast(e.target.value);
+                    localStorage.setItem('agy_wol_broadcast', e.target.value);
+                  }}
+                  placeholder="255.255.255.255"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    minWidth: 0,
+                    background: '#141414',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontFamily: 'Geist Mono, monospace',
+                  }}
+                />
+              </div>
+
+              <div style={{ flex: '1', minWidth: '70px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '11px', color: '#cbd5e1', fontWeight: 600 }}>
+                  Port:
+                </label>
+                <input
+                  type="text"
+                  value={wolPort}
+                  onChange={e => {
+                    setWolPort(e.target.value);
+                    localStorage.setItem('agy_wol_port', e.target.value);
+                  }}
+                  placeholder="9"
+                  style={{
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    minWidth: 0,
+                    background: '#141414',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '6px',
+                    padding: '8px 10px',
+                    color: '#ffffff',
+                    fontSize: '12px',
+                    fontFamily: 'Geist Mono, monospace',
+                    textAlign: 'center',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Architecture Tip Note */}
+            <div
+              style={{
+                background: 'rgba(0, 0, 0, 0.25)',
+                border: '1px solid rgba(255, 255, 255, 0.06)',
+                borderRadius: '6px',
+                padding: '9px 11px',
+                fontSize: '10.5px',
+                color: '#94a3b8',
+                lineHeight: '1.45',
+              }}
+            >
+              <strong style={{ color: '#ededed' }}>How Wake-on-LAN operates with Windows login:</strong>
+              <br />
+              1. Magic packet signals NIC to boot PC from cold/sleep state.
+              <br />
+              2. Windows boots to the Lock Screen. The lightweight KYBER background daemon starts with zero Electron RAM, connects to Tailscale/Wi-Fi, and signals online.
+              <br />
+              3. Antigravity IDE is NEVER in startup. It launches on-demand from your phone only when you open a project or send a prompt.
+            </div>
+
+            {wolFeedback && (
+              <span style={{ fontSize: '11px', color: '#38bdf8', textAlign: 'center', fontWeight: 500 }}>
+                {wolFeedback}
               </span>
             )}
           </div>

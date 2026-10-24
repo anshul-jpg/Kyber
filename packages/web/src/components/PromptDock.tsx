@@ -576,7 +576,15 @@ export const PromptDock = React.memo<PromptDockProps>(({
                 padding: '4px',
               }}
             >
-              {['Gemini 3.8 Flash Medium', 'Gemini 1.5 Pro', 'Claude 3.5 Sonnet', 'GPT-4o'].map(model => (
+              {[
+                'Gemini 3.8 Flash High',
+                'Gemini 3.8 Flash Mid',
+                'Gemini 3.8 Flash Low',
+                'Claude Opus 4.5',
+                'Claude Sonnet 4.5',
+                'GPT-4.5',
+                'GPT OSS',
+              ].map(model => (
                 <button
                   key={model}
                   onClick={() => {

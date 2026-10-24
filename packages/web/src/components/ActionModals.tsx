@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   X,
   FileText,
@@ -12,6 +12,8 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { FileTypeBadge, CopyButton, MarkdownContent, triggerHaptic } from './CommonUI';
+import { DiffViewer } from './ApprovalCards';
+import { decodePairingTicket, TerminalEntry } from '@agy-companion/protocol';
 
 interface ModifiedFile {
   file: string;
@@ -39,6 +41,7 @@ export interface ActivePreviewItem {
   title: string;
   path: string;
   isArtifact: boolean;
+  isDiff?: boolean;
   content?: string;
   base64?: string;
   mimeType?: string;
@@ -55,10 +58,12 @@ interface ActionModalsProps {
   onToggleFolder: (path: string) => void;
   modifiedFilesList: ModifiedFile[];
   terminalLogs: string[];
+  terminalEntries?: TerminalEntry[];
   activeWorkspaceId?: string;
   activeWorkspaceName?: string;
   host?: string;
   port?: string;
+  initialOpenFile?: { path: string; name: string } | null;
 }
 
 export const ActionModals = React.memo<ActionModalsProps>(({
@@ -68,16 +73,25 @@ export const ActionModals = React.memo<ActionModalsProps>(({
   onToggleFolder,
   modifiedFilesList,
   terminalLogs,
+  terminalEntries = [],
   activeWorkspaceId,
   activeWorkspaceName,
   host,
   port,
+  initialOpenFile,
 }) => {
   const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, FileEntry[]>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
   const [artifacts, setArtifacts] = useState<SessionArtifactItem[]>([]);
   const [loadingArtifacts, setLoadingArtifacts] = useState<boolean>(false);
   const [previewItem, setPreviewItem] = useState<ActivePreviewItem | null>(null);
+  const terminalBottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (activeActionModal === 'terminal') {
+      terminalBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [terminalEntries, terminalLogs, activeActionModal]);
 
   const getHttpBase = useCallback(() => {
     const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
@@ -87,12 +101,41 @@ export const ActionModals = React.memo<ActionModalsProps>(({
       : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
   }, [host, port]);
 
+  const getAuthToken = useCallback((): string => {
+    if (typeof window === 'undefined') return '';
+    const stored = localStorage.getItem('agy_token');
+    if (stored) return stored;
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const urlToken = p.get('token');
+      if (urlToken) return urlToken;
+      const rawTicket = p.get('ticket');
+      if (rawTicket) {
+        const decoded = decodePairingTicket(rawTicket);
+        if (decoded?.token) return decoded.token;
+      }
+    } catch {}
+    return '';
+  }, []);
+
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }, [getAuthToken]);
+
   const fetchFiles = useCallback(async (subPath: string = '') => {
     setLoadingPaths(prev => ({ ...prev, [subPath]: true }));
     try {
       const httpBase = getHttpBase();
+      const token = getAuthToken();
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       const res = await fetch(
-        `${httpBase}/api/workspace/files?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&subPath=${encodeURIComponent(subPath)}`
+        `${httpBase}/api/workspace/files?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&subPath=${encodeURIComponent(subPath)}${tokenParam}`,
+        { headers: getAuthHeaders() }
       );
       if (res.ok) {
         const data = await res.json();
@@ -104,13 +147,15 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     } finally {
       setLoadingPaths(prev => ({ ...prev, [subPath]: false }));
     }
-  }, [getHttpBase, activeWorkspaceId]);
+  }, [getHttpBase, getAuthHeaders, getAuthToken, activeWorkspaceId]);
 
   const fetchArtifacts = useCallback(async () => {
     setLoadingArtifacts(true);
     try {
       const httpBase = getHttpBase();
-      const res = await fetch(`${httpBase}/api/session/artifacts`);
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(`${httpBase}/api/session/artifacts${tokenParam}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.artifacts)) {
@@ -121,16 +166,19 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     } finally {
       setLoadingArtifacts(false);
     }
-  }, [getHttpBase]);
+  }, [getHttpBase, getAuthHeaders, getAuthToken]);
 
   useEffect(() => {
     setPreviewItem(null);
     if (activeActionModal === 'explorer') {
       fetchFiles('');
+      if (initialOpenFile) {
+        handleOpenFile(initialOpenFile.path, initialOpenFile.name);
+      }
     } else if (activeActionModal === 'artifacts') {
       fetchArtifacts();
     }
-  }, [activeActionModal, activeWorkspaceId, fetchFiles, fetchArtifacts]);
+  }, [activeActionModal, activeWorkspaceId, initialOpenFile, fetchFiles, fetchArtifacts]);
 
   const handleToggleFolder = (folderPath: string) => {
     const isExpanding = !expandedFolders[folderPath];
@@ -150,8 +198,11 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     });
     try {
       const httpBase = getHttpBase();
+      const token = getAuthToken();
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
       const res = await fetch(
-        `${httpBase}/api/workspace/file/content?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&filePath=${encodeURIComponent(filePath)}`
+        `${httpBase}/api/workspace/file/content?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&filePath=${encodeURIComponent(filePath)}${tokenParam}`,
+        { headers: getAuthHeaders() }
       );
       if (res.ok) {
         const data = await res.json();
@@ -175,6 +226,43 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     }
   };
 
+  const handleOpenDiff = async (filePath: string, titleName: string) => {
+    triggerHaptic(15);
+    setPreviewItem({
+      title: titleName ? `${titleName} (Diff)` : 'Full Workspace Diff',
+      path: filePath,
+      isArtifact: false,
+      isDiff: true,
+      loading: true,
+    });
+    try {
+      const httpBase = getHttpBase();
+      const token = getAuthToken();
+      const tokenParam = token ? `&token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(
+        `${httpBase}/api/workspace/git/diff?workspaceId=${encodeURIComponent(activeWorkspaceId || '')}&filePath=${encodeURIComponent(filePath)}${tokenParam}`,
+        { headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setPreviewItem({
+          title: titleName ? `${titleName} (Diff)` : 'Full Workspace Diff',
+          path: filePath,
+          isArtifact: false,
+          isDiff: true,
+          content: data.diff || 'Working tree clean. No differences found.',
+          isText: true,
+          loading: false,
+        });
+      } else {
+        const err = await res.json().catch(() => ({ error: 'Failed to read diff' }));
+        setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.error || 'Failed to load diff' } : null));
+      }
+    } catch (err: any) {
+      setPreviewItem(prev => (prev ? { ...prev, loading: false, error: err.message || 'Connection error' } : null));
+    }
+  };
+
   const handleOpenArtifact = async (art: SessionArtifactItem) => {
     triggerHaptic(15);
     setPreviewItem({
@@ -186,7 +274,11 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     });
     try {
       const httpBase = getHttpBase();
-      const res = await fetch(`${httpBase}/api/session/artifact/content?path=${encodeURIComponent(art.relPath)}`);
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      const res = await fetch(`${httpBase}/api/session/artifact/content?path=${encodeURIComponent(art.relPath)}${tokenParam}`, {
+        headers: getAuthHeaders(),
+      });
       if (res.ok) {
         const data = await res.json();
         setPreviewItem({
@@ -221,8 +313,24 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     if (!files || files.length === 0) {
       if (loadingPaths[subPath]) return null;
       return (
-        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '4px 8px', fontSize: '11px', color: '#666666' }}>
-          (empty)
+        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '8px 10px', fontSize: '11.5px', color: '#858585', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <span>(empty)</span>
+          {depth === 0 && (
+            <button
+              onClick={() => fetchFiles('')}
+              style={{
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: '4px',
+                color: '#cccccc',
+                padding: '2px 8px',
+                fontSize: '11px',
+                cursor: 'pointer',
+              }}
+            >
+              Scan Again
+            </button>
+          )}
         </div>
       );
     }
@@ -379,6 +487,8 @@ export const ActionModals = React.memo<ActionModalsProps>(({
               style={{ maxWidth: '100%', maxHeight: '420px', borderRadius: '4px', objectFit: 'contain' }}
             />
           </div>
+        ) : previewItem.isDiff ? (
+          <DiffViewer diff={previewItem.content || ''} maxHeight="480px" />
         ) : previewItem.title.toLowerCase().endsWith('.md') ? (
           <div
             style={{
@@ -533,64 +643,245 @@ export const ActionModals = React.memo<ActionModalsProps>(({
 
           {/* Diff Modal */}
           {activeActionModal === 'diff' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {modifiedFilesList.length === 0 ? (
-                <div style={{ padding: '24px', textAlign: 'center', color: '#858585', fontSize: '13px' }}>
-                  Working tree clean. No modified files detected.
-                </div>
-              ) : (
-                modifiedFilesList.map((f, i) => (
-                  <div
-                    key={i}
-                    onClick={() => handleOpenFile(f.file, f.file)}
+            previewItem ? renderPreviewView() : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '6px 8px',
+                    background: 'rgba(255, 255, 255, 0.04)',
+                    borderRadius: '6px',
+                    marginBottom: '4px',
+                  }}
+                >
+                  <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
+                    Modified Files ({modifiedFilesList.length})
+                  </span>
+                  <button
+                    onClick={() => handleOpenDiff('', 'Workspace Changes')}
                     style={{
-                      background: '#1e1e1e',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: '6px',
-                      padding: '10px 12px',
+                      background: 'rgba(0, 120, 212, 0.15)',
+                      border: '1px solid rgba(0, 120, 212, 0.3)',
+                      color: '#60a5fa',
+                      borderRadius: '5px',
+                      padding: '4px 10px',
+                      fontSize: '11.5px',
+                      fontWeight: 600,
+                      cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      justifyContent: 'space-between',
-                      fontSize: '12.5px',
-                      cursor: 'pointer',
+                      gap: '4px',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <FileTypeBadge name={f.file} />
-                      <span style={{ color: '#ffffff', fontFamily: 'monospace' }}>{f.file}</span>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#4ade80' }}>+{f.ins}</span>
-                      <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#f87171' }}>-{f.del}</span>
-                      <span style={{ fontSize: '11px', color: f.isNew ? '#4ade80' : '#f59e0b', background: 'rgba(255, 255, 255, 0.05)', padding: '2px 6px', borderRadius: '4px' }}>
-                        {f.isNew ? 'U' : 'M'}
-                      </span>
-                    </div>
+                    <span>Full Workspace Diff</span>
+                  </button>
+                </div>
+
+                {modifiedFilesList.length === 0 ? (
+                  <div style={{ padding: '24px', textAlign: 'center', color: '#858585', fontSize: '13px' }}>
+                    Working tree clean. No modified files detected.
                   </div>
-                ))
-              )}
-            </div>
+                ) : (
+                  modifiedFilesList.map((f, i) => (
+                    <div
+                      key={i}
+                      onClick={() => handleOpenDiff(f.file, f.file)}
+                      style={{
+                        background: '#1e1e1e',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '6px',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '12.5px',
+                        cursor: 'pointer',
+                        transition: 'background 0.1s ease',
+                      }}
+                      onMouseEnter={e => (e.currentTarget.style.background = '#252528')}
+                      onMouseLeave={e => (e.currentTarget.style.background = '#1e1e1e')}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0, flex: 1 }}>
+                        <FileTypeBadge name={f.file} />
+                        <span style={{ color: '#ffffff', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {f.file}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                        <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#4ade80' }}>+{f.ins}</span>
+                        <span style={{ fontFamily: 'monospace', fontSize: '11px', color: '#f87171' }}>-{f.del}</span>
+                        <span style={{ fontSize: '11px', color: f.isNew ? '#4ade80' : '#f59e0b', background: 'rgba(255, 255, 255, 0.05)', padding: '2px 6px', borderRadius: '4px' }}>
+                          {f.isNew ? 'U' : 'M'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            )
           )}
 
           {/* Terminal Modal */}
           {activeActionModal === 'terminal' && (
-            <div
-              style={{
-                background: '#0c0c0c',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '8px',
-                padding: '12px',
-                fontFamily: 'monospace',
-                fontSize: '12px',
-                color: '#e2e8f0',
-                whiteSpace: 'pre-wrap',
-                minHeight: '200px',
-              }}
-            >
-              {terminalLogs.length === 0 ? (
-                <span style={{ color: '#666666' }}>No terminal commands executed yet.</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 10px',
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  borderRadius: '6px',
+                  marginBottom: '4px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{
+                      width: '7px',
+                      height: '7px',
+                      borderRadius: '50%',
+                      background: '#10b981',
+                      display: 'inline-block',
+                      boxShadow: '0 0 8px rgba(16, 185, 129, 0.6)',
+                    }}
+                  />
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: '#e2e8f0' }}>
+                    Live Console Stream
+                  </span>
+                  <span style={{ fontSize: '10.5px', color: '#71717a' }}>
+                    ({terminalEntries.length > 0 ? terminalEntries.length : terminalLogs.length} events)
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {(terminalEntries.length > 0 || terminalLogs.length > 0) && (
+                    <button
+                      onClick={() => {
+                        const fullText = terminalEntries.length > 0
+                          ? terminalEntries.map(e => (e.command ? `$ ${e.command}\n${e.output}` : e.output)).join('\n\n')
+                          : terminalLogs.join('\n\n');
+                        navigator.clipboard?.writeText(fullText);
+                        triggerHaptic(20);
+                      }}
+                      style={{
+                        background: '#252525',
+                        border: '1px solid rgba(255, 255, 255, 0.08)',
+                        borderRadius: '4px',
+                        color: '#d4d4d8',
+                        fontSize: '11px',
+                        padding: '3px 8px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Copy All
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {terminalEntries.length === 0 && terminalLogs.length === 0 ? (
+                <div
+                  style={{
+                    background: '#0c0c0c',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '8px',
+                    padding: '24px 16px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    color: '#71717a',
+                    textAlign: 'center',
+                  }}
+                >
+                  No terminal commands or output captured yet.
+                </div>
+              ) : terminalEntries.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {terminalEntries.map(entry => {
+                    const timeStr = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+                    const isSuccess = entry.exitCode === undefined || entry.exitCode === 0;
+                    return (
+                      <div
+                        key={entry.id}
+                        style={{
+                          background: '#0c0c0c',
+                          border: '1px solid rgba(255, 255, 255, 0.08)',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          fontFamily: 'monospace',
+                          fontSize: '11.5px',
+                        }}
+                      >
+                        {entry.command && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '6px 10px',
+                              background: '#161616',
+                              borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                              gap: '8px',
+                            }}
+                          >
+                            <span style={{ color: '#38bdf8', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              $ {entry.command}
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                              {entry.exitCode !== undefined && (
+                                <span
+                                  style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: 700,
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                    background: isSuccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                    color: isSuccess ? '#34d399' : '#f87171',
+                                    border: `1px solid ${isSuccess ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+                                  }}
+                                >
+                                  exit {entry.exitCode}
+                                </span>
+                              )}
+                              {timeStr && <span style={{ fontSize: '10px', color: '#52525b' }}>{timeStr}</span>}
+                            </div>
+                          </div>
+                        )}
+                        <div
+                          style={{
+                            padding: '10px',
+                            color: '#e2e8f0',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-all',
+                            lineHeight: 1.45,
+                            maxHeight: '300px',
+                            overflowY: 'auto',
+                          }}
+                        >
+                          {entry.output || <span style={{ color: '#52525b' }}>(no output)</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div ref={terminalBottomRef} />
+                </div>
               ) : (
-                terminalLogs.join('\n\n')
+                <div
+                  style={{
+                    background: '#0c0c0c',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '8px',
+                    padding: '12px',
+                    fontFamily: 'monospace',
+                    fontSize: '12px',
+                    color: '#e2e8f0',
+                    whiteSpace: 'pre-wrap',
+                    minHeight: '200px',
+                  }}
+                >
+                  {terminalLogs.join('\n\n')}
+                </div>
               )}
             </div>
           )}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Folder, GitBranch, Layers, MessageSquare, ArrowRight } from 'lucide-react';
-import { WorkspaceState } from '@agy-companion/protocol';
+import { WorkspaceState, RecentProject } from '@agy-companion/protocol';
 import { KyberLogo, triggerHaptic } from './CommonUI';
 
 interface HomeScreenProps {
@@ -8,6 +8,8 @@ interface HomeScreenProps {
   activeWorkspaceId: string;
   onSelectWorkspace: (id: string) => void;
   onOpenExplorer: () => void;
+  recentProjects?: RecentProject[];
+  onLaunchRecentProject?: (path: string) => void;
   activeConversation?: {
     id?: string;
     title?: string;
@@ -21,6 +23,8 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
   activeWorkspaceId,
   onSelectWorkspace,
   onOpenExplorer,
+  recentProjects = [],
+  onLaunchRecentProject,
   activeConversation,
   onResumeActiveChat,
 }) => {
@@ -244,6 +248,94 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
           })}
         </div>
       </div>
+
+      {/* Recent Projects Section */}
+      {recentProjects && recentProjects.filter(p => !p.isOpen).length > 0 && (
+        <div style={{ width: '100%', marginBottom: '28px' }}>
+          <div
+            style={{
+              fontSize: '12px',
+              fontWeight: 600,
+              color: '#858585',
+              marginBottom: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}
+          >
+            <span>Recent Projects ({recentProjects.filter(p => !p.isOpen).length})</span>
+            <span style={{ fontSize: '10.5px', color: '#71717a' }}>1-tap launch & hook</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {recentProjects
+              .filter(p => !p.isOpen)
+              .map(project => (
+                <div
+                  key={project.path}
+                  onClick={() => {
+                    onLaunchRecentProject?.(project.path);
+                    triggerHaptic(25);
+                  }}
+                  style={{
+                    background: '#1e1e1e',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '8px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.15s ease, background 0.15s ease',
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+                    <Folder size={16} color="#71717a" style={{ flexShrink: 0 }} />
+                    <div style={{ overflow: 'hidden' }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {project.name}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#71717a', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {project.path}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                    {project.hasHook && (
+                      <span
+                        style={{
+                          fontSize: '9.5px',
+                          color: '#10b981',
+                          background: 'rgba(16, 185, 129, 0.12)',
+                          padding: '2px 5px',
+                          borderRadius: '3px',
+                          fontWeight: 600,
+                        }}
+                      >
+                        Hooked
+                      </span>
+                    )}
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        color: '#38bdf8',
+                        background: 'rgba(56, 189, 248, 0.12)',
+                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        padding: '4px 10px',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      Launch
+                    </span>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
 
       {/* Core Extensions Section */}
       <div style={{ width: '100%' }}>

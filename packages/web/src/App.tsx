@@ -12,6 +12,10 @@ import {
   CompanionMode,
   AgentQuota,
   AudioAttachment,
+  EditorTab,
+  RecentProject,
+  TerminalEntry,
+  HostTelemetry,
 } from '@agy-companion/protocol';
 import {
   dispatchApprovalNotification,
@@ -23,6 +27,7 @@ import {
 
 import { triggerHaptic } from './components/CommonUI';
 import { Header } from './components/Header';
+import { EditorTabsStrip } from './components/EditorTabsStrip';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatFeed } from './components/ChatFeed';
 import { ApprovalCards } from './components/ApprovalCards';
@@ -31,9 +36,10 @@ import { BottomStatusBar } from './components/BottomStatusBar';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { ActionModals } from './components/ActionModals';
 import { SettingsModal } from './components/SettingsModal';
+import { useCompanionSocket } from './hooks/useCompanionSocket';
 
 export default function App() {
-  // Check URL ticket on initial boot
+  // Check URL ticket or token on initial boot
   const initialTicket = useMemo(() => {
     if (typeof window !== 'undefined') {
       const p = new URLSearchParams(window.location.search);
@@ -50,6 +56,10 @@ export default function App() {
           } catch {}
           return decoded;
         }
+      }
+      const rawToken = p.get('token');
+      if (rawToken) {
+        localStorage.setItem('agy_token', rawToken);
       }
     }
     return null;
@@ -84,9 +94,9 @@ export default function App() {
     return '4040';
   });
 
-  const [connected, setConnected] = useState<boolean>(false);
-  const [reconnectTick, setReconnectTick] = useState<number>(0);
-  const [companionMode, setCompanionMode] = useState<CompanionMode>('remote');
+  const [companionMode, setCompanionMode] = useState<CompanionMode>(() => {
+    return (localStorage.getItem('agy_companion_mode') as CompanionMode) || 'remote';
+  });
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
   const [, setTailscaleIp] = useState<string | null>(null);
   const [ideStatus, setIdeStatus] = useState<'active' | 'dormant'>('active');
@@ -102,6 +112,8 @@ export default function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [activeSessionBackup, setActiveSessionBackup] = useState<{ id: string; title: string; messages: ChatMessage[] } | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
+  const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
+  const [selectedTabFile, setSelectedTabFile] = useState<{ path: string; name: string } | null>(null);
 
   // Prompt & Input Dock States
   const [promptText, setPromptText] = useState<string>('');
@@ -109,7 +121,7 @@ export default function App() {
   const [isQueued, setIsQueued] = useState<boolean>(false);
   const [attachedImages, setAttachedImages] = useState<{ preview: string; name: string; base64: string }[]>([]);
   const [attachedAudio, setAttachedAudio] = useState<AttachedAudio | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>('Gemini 3.8 Flash Medium');
+  const [selectedModel, setSelectedModel] = useState<string>('Gemini 3.8 Flash High');
 
   // Modals & Panels
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
@@ -121,6 +133,30 @@ export default function App() {
   const [agentQuotas, setAgentQuotas] = useState<AgentQuota[]>([]);
   const [showFilesWithChanges, setShowFilesWithChanges] = useState<boolean>(false);
   const [activeActionModal, setActiveActionModal] = useState<'diff' | 'terminal' | 'artifacts' | 'browser' | 'explorer' | null>(null);
+  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
+  const [hostTelemetry, setHostTelemetry] = useState<HostTelemetry | null>(null);
+
+  const getAuthToken = useCallback((): string => {
+    if (typeof window === 'undefined') return '';
+    const stored = localStorage.getItem('agy_token');
+    if (stored) return stored;
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return p.get('token') || '';
+    } catch {
+      return '';
+    }
+  }, []);
+
+  const getAuthHeaders = useCallback((): Record<string, string> => {
+    const token = getAuthToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    return headers;
+  }, [getAuthToken]);
 
   const updateExecutionPolicy = (policy: ExecutionPolicy) => {
     setExecutionPolicy(policy);
@@ -137,7 +173,7 @@ export default function App() {
 
       fetch(`${httpBase}/api/policy`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ policy }),
       }).catch(() => {});
     } catch {}
@@ -173,6 +209,43 @@ export default function App() {
   const pendingApprovalsRef = useRef(pendingApprovals);
   pendingApprovalsRef.current = pendingApprovals;
   const lastThinkingNotifyRef = useRef<number>(0);
+
+  // Companion Socket Hook
+  const {
+    connected,
+    authError,
+    setAuthError,
+    reconnectTick,
+    setReconnectTick,
+    sendClientMessage,
+  } = useCompanionSocket({
+    host,
+    port,
+    wsRef,
+    activeWorkspaceId,
+    setActiveWorkspaceId,
+    setWorkspaces,
+    setPendingApprovals,
+    setChatMessages,
+    setCompanionMode,
+    setExecutionPolicy,
+    setConversationTitle,
+    setConversations,
+    setTailscaleIp,
+    setQuickActions,
+    setIdeStatus,
+    setApkUpdateAvailable,
+    setAgentQuotas,
+    setEditorTabs,
+    setRecentProjects,
+    setTerminalEntries,
+    setHostTelemetry,
+    setIsStreaming,
+    setCurrentThinking,
+    setIsQueued,
+    setActiveSessionBackup,
+    getAuthHeaders,
+  });
 
   // Thinking Elapsed Timer Effect
   useEffect(() => {
@@ -295,402 +368,6 @@ export default function App() {
     }
   }, [pendingApprovals.length]);
 
-  // Connect WebSocket
-  useEffect(() => {
-    localStorage.setItem('agy_host', host);
-    localStorage.setItem('agy_port', port);
-
-    let wsUrl = '';
-    const cleanHost = (host || '')
-      .trim()
-      .replace(/^https?:\/\//, '')
-      .replace(/^wss?:\/\//, '')
-      .replace(/\/$/, '');
-
-    let hostWithoutPort = cleanHost.replace(/:\d+$/, '');
-    const isMobileApp = navigator.userAgent.includes('Android') || !!(window as any).Capacitor;
-    if (isMobileApp && (hostWithoutPort === 'localhost' || hostWithoutPort === '127.0.0.1')) {
-      hostWithoutPort = '100.107.129.104';
-    }
-
-    if (cleanHost.includes('.trycloudflare.com')) {
-      wsUrl = `wss://${hostWithoutPort}`;
-    } else if (window.location.protocol === 'https:' && window.location.hostname.includes('.trycloudflare.com')) {
-      wsUrl = `wss://${window.location.host}`;
-    } else {
-      const targetHost = hostWithoutPort || '100.107.129.104';
-      const targetPort = (!port || port === '443') ? '4040' : port;
-      wsUrl = `ws://${targetHost}:${targetPort}`;
-    }
-
-    let socket: WebSocket;
-    let reconnectTimeout: any = null;
-    let lastActivity = Date.now();
-
-    try {
-      socket = new WebSocket(wsUrl);
-      wsRef.current = socket;
-    } catch (e) {
-      console.error('[Companion] Socket connection failed:', e);
-      return;
-    }
-
-    socket.onopen = () => {
-      setConnected(true);
-      lastActivity = Date.now();
-      triggerHaptic(30);
-      const hello: WsClientMessage = {
-        type: 'client:hello',
-        deviceId: 'companion-client',
-        name: navigator.userAgent.includes('Android') ? 'Android APK' : 'Mobile Web',
-      };
-      socket.send(JSON.stringify(hello));
-    };
-
-    socket.onmessage = event => {
-      lastActivity = Date.now();
-      try {
-        const msg = JSON.parse(event.data) as WsServerMessage;
-        switch (msg.type) {
-          case 'server:hello':
-            setWorkspaces(msg.workspaces || []);
-            if (msg.workspaces && msg.workspaces.length > 0 && !activeWorkspaceId) {
-              setActiveWorkspaceId(msg.workspaces[0].id);
-            }
-            const helloApprovals = (msg.workspaces || []).flatMap(w => w.pendingApprovals || []);
-            setPendingApprovals(helloApprovals);
-            if (helloApprovals.length === 0) {
-              clearApprovalNotification();
-            }
-            if (msg.history && msg.history.length > 0) {
-              setChatMessages(msg.history);
-              const lastMsg = msg.history[msg.history.length - 1];
-              if (lastMsg && (lastMsg.role === 'assistant' || (lastMsg.role === 'tool' && !lastMsg.thought))) {
-                setIsStreaming(false);
-                setCurrentThinking(null);
-                setIsQueued(false);
-              }
-            }
-            if (msg.mode) {
-              setCompanionMode(msg.mode);
-            }
-            if (msg.executionPolicy) {
-              setExecutionPolicy(msg.executionPolicy);
-              localStorage.setItem('agy_execution_policy', msg.executionPolicy);
-            }
-            if (msg.conversationTitle) {
-              setConversationTitle(msg.conversationTitle);
-            }
-            if (msg.conversations) {
-              setConversations(msg.conversations);
-            }
-            if (msg.tailscaleIp) {
-              setTailscaleIp(msg.tailscaleIp);
-            }
-            if (msg.quickActions) {
-              setQuickActions(msg.quickActions);
-            }
-            if (msg.ideStatus) {
-              setIdeStatus(msg.ideStatus);
-            }
-            if (msg.apkBuildTime) {
-              const lastInstalled = Number(localStorage.getItem('agy_installed_apk_time') || '0');
-              if (msg.apkBuildTime > lastInstalled) {
-                setApkUpdateAvailable(true);
-              }
-            }
-            if (msg.agentQuotas && msg.agentQuotas.length > 0) {
-              setAgentQuotas(msg.agentQuotas);
-            }
-            break;
-
-          case 'server:apk_status':
-            if (msg.apkBuildTime) {
-              const lastInstalled = Number(localStorage.getItem('agy_installed_apk_time') || '0');
-              if (msg.apkBuildTime > lastInstalled) {
-                setApkUpdateAvailable(true);
-              }
-            }
-            break;
-
-          case 'server:workspaces_updated': {
-            setWorkspaces(msg.workspaces || []);
-            const updatedApprovals = (msg.workspaces || []).flatMap(w => w.pendingApprovals || []);
-            setPendingApprovals(updatedApprovals);
-            if (updatedApprovals.length === 0) {
-              clearApprovalNotification();
-            }
-            break;
-          }
-
-          case 'server:quick_actions_updated':
-            setQuickActions(msg.actions || []);
-            break;
-
-          case 'server:history': {
-            const raw = (msg.messages || []) as ChatMessage[];
-            const cleaned = raw.filter(m => {
-              if (m.role === 'assistant' && m.content && /^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out/i.test(m.content)) {
-                return false;
-              }
-              return true;
-            });
-            setChatMessages(cleaned);
-            if (msg.conversationTitle) {
-              setConversationTitle(msg.conversationTitle);
-            }
-            setActiveSessionBackup(null);
-            setIsQueued(false);
-            setIsStreaming(false);
-            setCurrentThinking(null);
-            break;
-          }
-
-          case 'server:conversations_list':
-            setConversations(msg.conversations || []);
-            break;
-
-          case 'server:ide_status':
-            setIdeStatus(msg.status);
-            break;
-
-          case 'server:chat_message':
-            if (msg.message.role === 'assistant' && msg.message.content && /^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out/i.test(msg.message.content)) {
-              break;
-            }
-            setChatMessages(prev => {
-              // 1. If incoming message is a user message, deduplicate against any existing client_u_ or msg_u_ or ide_u_
-              const cleanNorm = (t: string) => (t || '').replace(/\s*\[Attached Media\]:[\s\S]*$/i, '').trim();
-
-              if (msg.message.role === 'user') {
-                const incomingClean = cleanNorm(msg.message.content);
-
-                const existingIdx = prev.findIndex(
-                  m => m.role === 'user' && (
-                    m.id === msg.message.id ||
-                    (
-                      (m.id.startsWith('client_u_') || m.id.startsWith('msg_u_') || m.id.startsWith('ide_u_')) &&
-                      (
-                        cleanNorm(m.content) === incomingClean ||
-                        incomingClean.startsWith(cleanNorm(m.content)) ||
-                        cleanNorm(m.content).startsWith(incomingClean)
-                      ) &&
-                      Math.abs((m.timestamp || 0) - (msg.message.timestamp || 0)) < 120000
-                    )
-                  )
-                );
-
-                if (existingIdx !== -1) {
-                  const updated = [...prev];
-                  const existingMsg = prev[existingIdx];
-                  const mergedImages = (msg.message.images && msg.message.images.length > 0)
-                    ? msg.message.images
-                    : existingMsg.images;
-                  const mergedAudio = msg.message.audio || existingMsg.audio;
-
-                  updated[existingIdx] = {
-                    ...msg.message,
-                    content: incomingClean || msg.message.content,
-                    images: mergedImages,
-                    audio: mergedAudio,
-                  };
-                  return updated.filter(m => m.id !== 'streaming_active');
-                }
-              }
-
-              const withoutOptimistic = prev.filter(
-                m => m.id !== 'streaming_active' && !(
-                  m.role === 'user' && (
-                    m.id.startsWith('client_u_') || m.id.startsWith('msg_u_')
-                  ) && (
-                    cleanNorm(m.content) === cleanNorm(msg.message.content) ||
-                    cleanNorm(msg.message.content).startsWith(cleanNorm(m.content)) ||
-                    cleanNorm(m.content).startsWith(cleanNorm(msg.message.content))
-                  )
-                )
-              );
-              if (withoutOptimistic.some(m => m.id === msg.message.id)) {
-                return withoutOptimistic;
-              }
-              return [...withoutOptimistic, { ...msg.message, content: cleanNorm(msg.message.content) || msg.message.content }];
-            });
-            if (msg.message.role === 'assistant' && msg.message.content) {
-              setIsQueued(false);
-              setIsStreaming(false);
-              setCurrentThinking(null);
-              const clean = sanitizeNotificationText(msg.message.content);
-              const preview = clean.length > 120 ? clean.slice(0, 120) + '...' : clean;
-              updatePersistentCompanionNotification('Turn Complete', preview || 'Response ready', undefined, true, 'Antigravity IDE');
-            } else if (msg.message.role === 'tool') {
-              setIsQueued(false);
-              if (msg.message.thought) {
-                setCurrentThinking(msg.message.thought);
-              }
-              setIsStreaming(true);
-            } else if (msg.message.thought) {
-              setIsQueued(false);
-              setCurrentThinking(msg.message.thought);
-            }
-            break;
-
-          case 'server:mode_updated':
-            setCompanionMode(msg.mode);
-            break;
-
-          case 'server:execution_policy_updated':
-            setExecutionPolicy(msg.policy);
-            localStorage.setItem('agy_execution_policy', msg.policy);
-            break;
-
-          case 'server:agent_quotas':
-            setAgentQuotas(msg.quotas);
-            break;
-
-          case 'server:approval_requested':
-            setIsQueued(false);
-            setIsStreaming(true);
-            setPendingApprovals(prev => {
-              const updated = prev.some(r => r.id === msg.request.id) ? prev : [...prev, msg.request];
-              triggerHaptic([100, 50, 100]);
-              const countPrefix = updated.length > 1 ? `[${updated.length} Pending] ` : '';
-              dispatchApprovalNotification(
-                msg.request.id,
-                `${countPrefix}${msg.request.toolCall?.name || 'Tool Approval'}`,
-                msg.request.toolTitle || msg.request.toolCall?.args?.CommandLine || 'Antigravity requires your approval'
-              );
-              return updated;
-            });
-            break;
-
-          case 'server:approval_resolved':
-            setPendingApprovals(prev => {
-              const remaining = prev.filter(r => r.id !== msg.requestId);
-              if (remaining.length === 0) {
-                clearApprovalNotification();
-              } else {
-                const next = remaining[0];
-                const countPrefix = remaining.length > 1 ? `[${remaining.length} Pending] ` : '';
-                dispatchApprovalNotification(
-                  next.id,
-                  `${countPrefix}${next.toolCall?.name || 'Tool Approval'}`,
-                  next.toolTitle || next.toolCall?.args?.CommandLine || 'Antigravity requires your approval'
-                );
-              }
-              return remaining;
-            });
-            break;
-
-          case 'server:pong':
-            lastActivity = Date.now();
-            break;
-
-          case 'server:stream_thought':
-            setIsQueued(false);
-            setIsStreaming(true);
-            setCurrentThinking(msg.thought);
-            {
-              const now = Date.now();
-              if (now - lastThinkingNotifyRef.current > 2000) {
-                lastThinkingNotifyRef.current = now;
-                const cleanThought = sanitizeNotificationText(msg.thought);
-                const preview = cleanThought.length > 90 ? cleanThought.slice(0, 90) + '...' : cleanThought;
-                updatePersistentCompanionNotification('Agent Working', preview, undefined, false, 'Thinking');
-              }
-            }
-            break;
-
-          case 'server:stream_token':
-            setIsQueued(false);
-            setIsStreaming(true);
-            setChatMessages(prev => {
-              const last = prev[prev.length - 1];
-              if (last && last.id === 'streaming_active') {
-                const updated = [...prev];
-                updated[prev.length - 1] = {
-                  ...last,
-                  content: last.content + msg.token,
-                };
-                return updated;
-              } else {
-                return [
-                  ...prev,
-                  {
-                    id: 'streaming_active',
-                    role: 'assistant',
-                    content: msg.token,
-                    timestamp: Date.now(),
-                  },
-                ];
-              }
-            });
-            break;
-        }
-      } catch (err) {
-        console.error('[Companion] Message error:', err);
-      }
-    };
-
-    socket.onclose = () => {
-      setConnected(false);
-      wsRef.current = null;
-      clearTimeout(reconnectTimeout);
-      reconnectTimeout = setTimeout(() => {
-        setReconnectTick(t => t + 1);
-      }, 1500);
-    };
-
-    socket.onerror = () => {
-      setConnected(false);
-      try {
-        socket.close();
-      } catch {}
-    };
-
-    const pingInterval = setInterval(() => {
-      if (socket.readyState === WebSocket.OPEN) {
-        if (Date.now() - lastActivity > 15000) {
-          console.warn('[Companion] Watchdog timeout, reconnecting...');
-          try {
-            socket.close();
-          } catch {}
-          return;
-        }
-        socket.send(JSON.stringify({ type: 'client:ping' }));
-      }
-    }, 5000);
-
-    const handleWakeup = () => {
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        setReconnectTick(t => t + 1);
-      }
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        handleWakeup();
-      }
-    };
-
-    window.addEventListener('online', handleWakeup);
-    window.addEventListener('focus', handleWakeup);
-    document.addEventListener('visibilitychange', handleVisibility);
-
-    return () => {
-      clearTimeout(reconnectTimeout);
-      clearInterval(pingInterval);
-      window.removeEventListener('online', handleWakeup);
-      window.removeEventListener('focus', handleWakeup);
-      document.removeEventListener('visibilitychange', handleVisibility);
-      socket.onclose = null;
-      socket.onerror = null;
-      socket.onopen = null;
-      socket.onmessage = null;
-      try {
-        socket.close();
-      } catch {}
-    };
-  }, [host, port, reconnectTick]);
-
   // Send Decision
   const sendDecision = useCallback((
     requestId: string,
@@ -737,10 +414,23 @@ export default function App() {
         : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
       fetch(`${httpBase}/api/hook/approval`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(payload),
       }).catch(() => {});
     } catch {}
+
+    if (customText && customText.startsWith('User responded from mobile companion:')) {
+      const cleanAnswer = customText.replace('User responded from mobile companion:', '').trim();
+      setChatMessages(prev => [
+        ...prev,
+        {
+          id: `ans_${Date.now()}`,
+          role: 'user',
+          content: cleanAnswer,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
 
     setPendingApprovals(prev => {
       const remaining = prev.filter(r => r.id !== requestId);
@@ -773,7 +463,7 @@ export default function App() {
         : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
       fetch(`${httpBase}/api/approvals/clear`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
       }).catch(() => {});
     } catch {}
     setPendingApprovals([]);
@@ -800,6 +490,7 @@ export default function App() {
   // Toggle Mode
   const toggleMode = (newMode: CompanionMode) => {
     setCompanionMode(newMode);
+    localStorage.setItem('agy_companion_mode', newMode);
     triggerHaptic(30);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(
@@ -818,7 +509,7 @@ export default function App() {
 
       fetch(`${httpBase}/api/mode`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ mode: newMode }),
       }).catch(() => {});
     } catch {}
@@ -861,7 +552,7 @@ export default function App() {
 
       fetch(`${httpBase}/api/stop`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ workspaceId: activeWorkspaceId }),
       }).catch(() => {});
     } catch {}
@@ -906,6 +597,7 @@ export default function App() {
       prompt: textToSend,
       images: imagesPayload.length > 0 ? imagesPayload : undefined,
       audio: audioPayload,
+      model: selectedModel,
     };
 
     let sentViaWs = false;
@@ -922,21 +614,90 @@ export default function App() {
       const httpBase = cleanH.includes('.trycloudflare.com')
         ? `https://${hostNoPort}`
         : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
 
-      fetch(`${httpBase}/api/prompt`, {
+      fetch(`${httpBase}/api/prompt${tokenParam}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           prompt: textToSend,
           workspaceId: activeWorkspaceId || 'default',
           images: imagesPayload,
           audio: audioPayload,
+          model: selectedModel,
         }),
       }).catch(err => {
         console.warn('[Companion] HTTP prompt send error:', err);
       });
     }
   };
+
+  const handleLaunchRecentProject = useCallback((projectPath: string) => {
+    triggerHaptic(30);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'client:launch_project', path: projectPath }));
+    }
+    try {
+      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
+      const hostNoPort = cleanH.replace(/:\d+$/, '');
+      const httpBase = cleanH.includes('.trycloudflare.com')
+        ? `https://${hostNoPort}`
+        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      fetch(`${httpBase}/api/workspace/launch${tokenParam}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ path: projectPath }),
+      }).catch(() => {});
+    } catch {}
+  }, [host, port, getAuthHeaders, getAuthToken]);
+
+  const handleCloseIde = useCallback((providerId?: string) => {
+    triggerHaptic(40);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'client:close_ide', providerId }));
+    } else {
+      try {
+        const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
+        const hostNoPort = cleanH.replace(/:\d+$/, '');
+        const httpBase = cleanH.includes('.trycloudflare.com')
+          ? `https://${hostNoPort}`
+          : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+        const token = getAuthToken();
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+        fetch(`${httpBase}/api/host/close-ide${tokenParam}`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ providerId: providerId || 'antigravity' }),
+        }).catch(() => {});
+      } catch {}
+    }
+  }, [host, port, getAuthHeaders, getAuthToken]);
+
+  const handleRestartIde = useCallback((providerId?: string, workspacePath?: string) => {
+    triggerHaptic(30);
+    const targetPath = workspacePath || workspaces.find(w => w.id === activeWorkspaceId)?.path;
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'client:restart_ide', providerId, workspacePath: targetPath }));
+    } else {
+      try {
+        const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
+        const hostNoPort = cleanH.replace(/:\d+$/, '');
+        const httpBase = cleanH.includes('.trycloudflare.com')
+          ? `https://${hostNoPort}`
+          : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+        const token = getAuthToken();
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+        fetch(`${httpBase}/api/host/restart-ide${tokenParam}`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ providerId: providerId || 'antigravity', workspacePath: targetPath, path: targetPath }),
+        }).catch(() => {});
+      } catch {}
+    }
+  }, [host, port, workspaces, activeWorkspaceId, getAuthHeaders, getAuthToken]);
 
   // Trigger in-app APK update or browser download
   const handleInstallApk = () => {
@@ -1189,7 +950,108 @@ export default function App() {
             wsRef.current.send(JSON.stringify({ type: 'client:switch_workspace', workspaceId: id }));
           }
         }}
+        recentProjects={recentProjects}
+        onLaunchRecentProject={handleLaunchRecentProject}
+        hostTelemetry={hostTelemetry}
+        onCloseIde={handleCloseIde}
+        onRestartIde={handleRestartIde}
       />
+
+      {/* Active Editor Tabs Strip */}
+      <EditorTabsStrip
+        tabs={editorTabs}
+        activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+        onSelectTab={tab => {
+          setSelectedTabFile({ path: tab.path || tab.label, name: tab.label });
+          setActiveActionModal('explorer');
+        }}
+        onOpenExplorer={() => {
+          setSelectedTabFile(null);
+          setActiveActionModal('explorer');
+        }}
+        modifiedFiles={modifiedFilesList}
+      />
+
+      {/* 401 Unauthorized Re-Pairing Banner */}
+      {authError && !connected && (
+        <div
+          style={{
+            margin: '8px 14px',
+            background: '#1e1e1e',
+            border: '1px solid rgba(239, 68, 68, 0.45)',
+            borderRadius: '8px',
+            padding: '12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '8px',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+              <span style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff' }}>
+                Pairing Required (401 Unauthorized)
+              </span>
+            </div>
+            <button
+              onClick={() => setAuthError(false)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: '#858585',
+                cursor: 'pointer',
+                fontSize: '13px',
+                padding: '2px 6px',
+              }}
+            >
+              ✕
+            </button>
+          </div>
+          <p style={{ margin: 0, fontSize: '11.5px', color: '#a0a0a0', lineHeight: '1.4' }}>
+            The host PC rejected your remote connection. Please enter your pairing ticket in Settings to reconnect.
+          </p>
+          <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+            <button
+              onClick={() => {
+                triggerHaptic(20);
+                setShowSettingsModal(true);
+              }}
+              style={{
+                flex: 1,
+                background: '#007acc',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                color: '#ffffff',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Open Pairing Settings
+            </button>
+            <button
+              onClick={() => {
+                triggerHaptic(20);
+                setReconnectTick(t => t + 1);
+              }}
+              style={{
+                background: '#282828',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '6px',
+                padding: '8px 12px',
+                color: '#cccccc',
+                fontSize: '12px',
+                fontWeight: 500,
+                cursor: 'pointer',
+              }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Content Area */}
       <main
@@ -1218,6 +1080,8 @@ export default function App() {
               }
             }}
             onOpenExplorer={() => setActiveActionModal('explorer')}
+            recentProjects={recentProjects}
+            onLaunchRecentProject={handleLaunchRecentProject}
             activeConversation={
               activeSessionBackup
                 ? {
@@ -1319,15 +1183,20 @@ export default function App() {
       {/* Multi-Domain Action Bottom Sheets / Modals */}
       <ActionModals
         activeActionModal={activeActionModal}
-        onClose={() => setActiveActionModal(null)}
+        onClose={() => {
+          setActiveActionModal(null);
+          setSelectedTabFile(null);
+        }}
         expandedFolders={expandedFolders}
         onToggleFolder={toggleFolder}
         modifiedFilesList={modifiedFilesList}
         terminalLogs={sessionStats.terminalLogs}
+        terminalEntries={terminalEntries}
         activeWorkspaceId={activeWorkspaceId}
         activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
         host={host}
         port={port}
+        initialOpenFile={selectedTabFile}
       />
 
       {/* Connection & Pairing Settings Screen */}
@@ -1344,6 +1213,10 @@ export default function App() {
         companionMode={companionMode}
         onUpdateCompanionMode={m => toggleMode(m)}
         agentQuotas={agentQuotas}
+        hostTelemetry={hostTelemetry}
+        onCloseIde={handleCloseIde}
+        onRestartIde={handleRestartIde}
+        onEmergencyStop={handleEmergencyStop}
       />
     </div>
   );
