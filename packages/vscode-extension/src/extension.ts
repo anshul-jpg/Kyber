@@ -236,8 +236,11 @@ export function activate(context: vscode.ExtensionContext) {
     );
   }
   context.subscriptions.push(
-    vscode.window.onDidChangeActiveTextEditor(() => syncActiveTabs())
+    vscode.window.onDidChangeActiveTextEditor(() => syncActiveTabs()),
+    vscode.workspace.onDidSaveTextDocument(() => syncActiveTabs())
   );
+
+  daemonManager.on('ws_connected', () => syncActiveTabs());
 
   setTimeout(syncActiveTabs, 1500);
 

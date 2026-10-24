@@ -7,6 +7,7 @@ interface EditorTabsStripProps {
   tabs: EditorTab[];
   activeWorkspaceName?: string;
   onSelectTab: (tab: EditorTab) => void;
+  onInspectTab?: (tab: EditorTab) => void;
   onOpenExplorer?: () => void;
   modifiedFiles?: { file: string; fullPath?: string }[];
 }
@@ -15,9 +16,18 @@ export const EditorTabsStrip: React.FC<EditorTabsStripProps> = React.memo(({
   tabs,
   activeWorkspaceName,
   onSelectTab,
+  onInspectTab,
   onOpenExplorer,
   modifiedFiles = [],
 }) => {
+  const activeTabRef = React.useRef<HTMLDivElement | null>(null);
+
+  React.useEffect(() => {
+    if (activeTabRef.current) {
+      activeTabRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+  }, [tabs]);
+
   if (tabs.length === 0) {
     return (
       <div
@@ -90,9 +100,14 @@ export const EditorTabsStrip: React.FC<EditorTabsStripProps> = React.memo(({
         return (
           <div
             key={`${tab.path || tab.label}-${idx}`}
+            ref={isActive ? activeTabRef : undefined}
             onClick={() => {
               triggerHaptic(15);
-              onSelectTab(tab);
+              if (isActive && onInspectTab) {
+                onInspectTab(tab);
+              } else {
+                onSelectTab(tab);
+              }
             }}
             style={{
               display: 'flex',
@@ -136,6 +151,33 @@ export const EditorTabsStrip: React.FC<EditorTabsStripProps> = React.memo(({
           </div>
         );
       })}
+
+      {/* Explorer shortcut pinned at the end */}
+      {onOpenExplorer && (
+        <button
+          onClick={() => {
+            triggerHaptic(15);
+            onOpenExplorer();
+          }}
+          title="Browse workspace files"
+          style={{
+            background: 'transparent',
+            border: 'none',
+            color: '#71717a',
+            fontSize: '11px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '4px',
+            padding: '0 12px',
+            flexShrink: 0,
+            borderLeft: '1px solid rgba(255, 255, 255, 0.05)',
+          }}
+        >
+          <Folder size={12} />
+          <span>Files</span>
+        </button>
+      )}
     </div>
   );
 });

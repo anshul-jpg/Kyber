@@ -724,6 +724,16 @@ export class WsGateway {
         break;
       }
 
+      case 'client:open_editor_tab': {
+        if (msg.path) {
+          this.broadcast({
+            type: 'server:open_editor_tab',
+            path: msg.path,
+          });
+        }
+        break;
+      }
+
       case 'client:run_quick_action':
         this.broadcast({
           type: 'server:run_quick_action',

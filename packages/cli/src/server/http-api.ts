@@ -396,6 +396,34 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     return;
   }
 
+  // Open / Switch Tab in IDE
+  if (url === '/api/tabs/open' || url === '/api/workspace/tabs/open') {
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          if (data.path) {
+            gateway.broadcast({
+              type: 'server:open_editor_tab',
+              path: data.path,
+            });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, path: data.path }));
+            return;
+          }
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing path in request body' }));
+        } catch (e: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+  }
+
   // Live Terminal Logs History
   if (url === '/api/terminal/history' || url.startsWith('/api/terminal/history')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });

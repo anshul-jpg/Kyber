@@ -716,6 +716,7 @@ export class DaemonManager extends EventEmitter {
           workspacePath: currentWsPath,
         };
         this.wsClient?.send(JSON.stringify(helloMsg));
+        this.emit('ws_connected');
 
         this.pingInterval = setInterval(() => {
           if (this.wsClient?.readyState === WebSocket.OPEN) {
@@ -854,6 +855,12 @@ export class DaemonManager extends EventEmitter {
         }
         break;
 
+      case 'server:open_editor_tab':
+        if (msg.path) {
+          this.openEditorTab(msg.path);
+        }
+        break;
+
       case 'server:chat_message':
         this.recordActivity();
         break;
@@ -863,6 +870,23 @@ export class DaemonManager extends EventEmitter {
 
       default:
         break;
+    }
+  }
+
+  private async openEditorTab(filePath: string): Promise<void> {
+    try {
+      let targetUri: vscode.Uri;
+      if (path.isAbsolute(filePath)) {
+        targetUri = vscode.Uri.file(filePath);
+      } else {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        targetUri = workspaceRoot ? vscode.Uri.file(path.join(workspaceRoot, filePath)) : vscode.Uri.file(filePath);
+      }
+      const doc = await vscode.workspace.openTextDocument(targetUri);
+      await vscode.window.showTextDocument(doc, { preview: false, preserveFocus: false });
+      this.addLogLine(`[Editor Tab] Switched active editor tab to: ${filePath}`, 'info');
+    } catch (err: any) {
+      this.addLogLine(`[Editor Tab] Failed to switch editor tab: ${err?.message || err}`, 'warn');
     }
   }
 

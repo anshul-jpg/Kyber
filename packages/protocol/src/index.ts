@@ -156,6 +156,7 @@ export type WsClientMessage =
   | { type: 'client:clear_approvals' }
   | { type: 'client:list_workspace_files'; workspaceId?: string; subPath?: string }
   | { type: 'client:update_tabs'; tabs: EditorTab[]; workspaceId?: string }
+  | { type: 'client:open_editor_tab'; path: string }
   | { type: 'client:ping' };
 
 export interface ConversationSummary {
@@ -204,6 +205,7 @@ export type WsServerMessage =
   | { type: 'server:apk_status'; hasApk: boolean; apkBuildTime?: number; size?: number; version?: string }
   | { type: 'server:agent_quotas'; quotas: AgentQuota[] }
   | { type: 'server:tabs_updated'; tabs: EditorTab[]; workspaceId?: string }
+  | { type: 'server:open_editor_tab'; path: string }
   | { type: 'server:terminal_output'; entry: TerminalEntry }
   | { type: 'server:recent_projects_updated'; projects: RecentProject[] }
   | { type: 'server:open_workspace'; path: string }

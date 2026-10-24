@@ -962,6 +962,24 @@ export default function App() {
         tabs={editorTabs}
         activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
         onSelectTab={tab => {
+          if (tab.path || tab.label) {
+            setEditorTabs(prev =>
+              prev.map(t => ({
+                ...t,
+                isActive: (t.path && tab.path ? t.path === tab.path : t.label === tab.label),
+              }))
+            );
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+              wsRef.current.send(
+                JSON.stringify({
+                  type: 'client:open_editor_tab',
+                  path: tab.path || tab.label,
+                })
+              );
+            }
+          }
+        }}
+        onInspectTab={tab => {
           setSelectedTabFile({ path: tab.path || tab.label, name: tab.label });
           setActiveActionModal('explorer');
         }}
