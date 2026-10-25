@@ -601,3 +601,73 @@ When the developer triggered **Restart IDE** from the mobile companion app or se
    - In [provider-lifecycle.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/provider/provider-lifecycle.ts), added `isRestarting` concurrency lock.
    - In [App.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/App.tsx), `handleRestartIde` and `handleCloseIde` use `else` for HTTP fetch fallback, preventing duplicate dispatch.
    - In [ws-gateway.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/ws-gateway.ts), `resolveTargetWorkspace` safely resolves the active workspace without falling back to internal daemon subfolders.
+
+---
+
+## Revision Entry #018: Workspace Switching "Bin" Folder Trap & Chat History Desynchronization
+
+* **Date:** 2026-10-25
+* **Severity:** High (Switching projects sent user to "bin" folder or displayed "bin" in companion header, and lingering chat history from previous workspace failed to clear)
+* **Status:** Resolved & Verified
+
+### 1. What Error Was Caused?
+1. When switching folders/projects (e.g., to "FIRE TV") from the mobile companion app, the UI dropdown showed "bin" instead of the switched project name, or Antigravity IDE opened into `C:\Users\anshul\AppData\Local\Programs\Antigravity IDE\bin`.
+2. After switching, the previous workspace's chat transcript and session title lingered in the chat view instead of loading the target workspace's session or presenting a clean session.
+
+### 2. Root Cause Analysis
+1. **Dual-Dispatch Race Collision in `handleLaunchRecentProject`:**
+   - In `App.tsx`, `handleLaunchRecentProject` dispatched `wsRef.current.send({ type: 'client:launch_project', path })` AND executed `fetch('/api/workspace/launch')` in parallel.
+   - The WebSocket message instructed the extension to reload the window via `vscode.openFolder`. During window reload, the extension host disconnected.
+   - The concurrent HTTP request arrived while `isIdeActive()` was false. Because the extension was temporarily disconnected, `launchRecentProject` dropped to Step 3: directly spawning the executable.
+2. **Unquoted Spawn CWD & Windows Verbatim Arguments Space Splitting:**
+   - In `recent-projects.ts`, `spawnCwd` fell back to `path.dirname(exe)`. When `exe` was `.../Antigravity IDE/bin/antigravity-ide.cmd`, `spawnCwd` was literally the `bin` directory!
+   - Furthermore, `windowsVerbatimArguments: true` passed raw unquoted arguments like `D:\CODE\FIRE TV` to `cmd.exe /c`, which split arguments on spaces into `FIRE` and `TV`. Failing to resolve `FIRE`, VS Code defaulted to opening `cwd`, which was `bin`!
+3. **`vscode.openFolder` Second Argument Contract:**
+   - In `daemon-manager.ts`, `vscode.commands.executeCommand('vscode.openFolder', uri, { forceNewWindow: false })` passed an object options argument. Universal VS Code commands require boolean `false` as the second argument to guarantee reusing the existing window across all engine variants.
+4. **Chat History Stale Fallback:**
+   - In `ws-gateway.ts` and `http-api.ts`, if `autoDiscoverActiveConversation(targetPath)` returned null for a newly switched workspace, the handler fell back to `this.ideWatcher.getHistory()`, broadcasting the previous workspace's active messages and title.
+5. **`client:switch_workspace` Missing IDE Forwarding:**
+   - When tapping an active workspace in the header dropdown, `client:switch_workspace` only modified internal daemon state but never forwarded `server:open_workspace` to the IDE extension host.
+
+### 3. How Was It Solved?
+1. **Eliminated Dual-Dispatch:**
+   - In [App.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/App.tsx), `handleLaunchRecentProject` only invokes the HTTP fetch fallback if `wsRef.current` is not open.
+2. **Quoted Arguments, Safe CWD, and Concurrency Lock:**
+   - In [recent-projects.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/session/recent-projects.ts), `spawnCwd` is strictly `norm || os.homedir()` (never `path.dirname(exe)`).
+   - Path arguments passed to `cmd.exe` are explicitly quoted (`"${norm}"`).
+   - Added a 2.5s deduplication lock (`inFlightLaunch`) to reject concurrent duplicate launches.
+3. **Universal Window Reuse in Extension:**
+   - In [daemon-manager.ts](file:///d:/CODE/antigravity%20compainion/packages/vscode-extension/src/daemon-manager.ts), all `vscode.openFolder` invocations pass boolean `false`.
+4. **Clean History Switch & Active Sync:**
+   - In [ws-gateway.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/ws-gateway.ts) and [http-api.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/http-api.ts), `client:launch_project` and `client:switch_workspace` verify `activeConvId`; if none exists yet, history cleanly resets to `[]` and title reflects `targetWs.name`.
+   - `client:switch_workspace` now forwards `server:open_workspace` to the extension host so tapping containers in the dropdown switches the desktop IDE in lockstep.
+
+---
+
+## Revision 28: Multi-Workspace Switching, Code Roots & Explorer File Tree Synchronization
+
+### 1. What Went Wrong?
+1. **Omission of Inactive Workspaces in Recent Projects:**
+   - When switching workspaces (e.g. from Antigravity Companion to FireTV or another project), the previous workspace remained in `workspaceManager` and was counted as an active container (`isOpen: true`). In `Header.tsx`, `recentProjects.filter(p => !p.isOpen)` omitted it, making it disappear from Recent Projects on mobile.
+2. **File Tree Stale State and Resolution Fallback:**
+   - In `WorkspaceView.tsx` and `ActionModals.tsx`, `workspaceFiles` was not reset when `activeWorkspaceId` changed.
+   - On the server, `resolveWorkspace` failed to decode base64url IDs if the workspace wasn't pre-loaded in memory, falling back to `list[0]` (the original daemon cwd), resulting in directory mismatches or "Loading files..." states.
+3. **Dummy Button & API Parameter Inconsistencies:**
+   - In `WorkspaceView.tsx`, clicking "Open" on a project did not transition the user to the chat view (`setActiveSegment('chat')`) or provide visual tactile feedback, making it appear as a dummy button.
+   - `/api/workspace/roots` expected `data.path`, but `WorkspaceView` sent `root`.
+   - `/api/workspace/create` expected `data.rootPath` and `data.name`, but `WorkspaceView` sent `root` and `projectName`, and looked for `data.projectPath` while the server returned `data.path`.
+4. **Workspace Explorer Missing Target Context:**
+   - `ActionModals.tsx` displayed a static "Workspace Explorer" title without displaying the active repository name.
+
+### 2. How Was It Solved?
+1. **Accurate Open Workspace Tracking:**
+   - In [ws-gateway.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/ws-gateway.ts), `getAllProjects()` checks `extensionWorkspaces.values()` so only workspaces with an active IDE extension window attached are marked `isOpen: true`. Inactive workspaces immediately appear in Recent Projects.
+2. **Base64url Decoding & Extension Fallback in Workspace Resolution:**
+   - In [ws-gateway.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/ws-gateway.ts) and [workspace-manager.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/session/workspace-manager.ts), `resolveWorkspace` and `getWorkspace` decode base64url IDs into directory paths and auto-register them if they exist on disk, avoiding fallbacks to the first workspace.
+3. **Flexible API Contract & Tactile Launch Feedback:**
+   - In [http-api.ts](file:///d:/CODE/antigravity%20compainion/packages/cli/src/server/http-api.ts), `/api/workspace/roots` and `/api/workspace/create` accept `path`/`root` and `name`/`projectName` interchangeably, returning both `path` and `projectPath`.
+   - In [WorkspaceView.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/WorkspaceView.tsx), added `launchingProject` spinner state and error/retry feedback.
+   - In [App.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/App.tsx), `handleLaunchRecentProject` switches `activeSegment` to `'chat'`.
+4. **Clean File Tree State & Explorer Identity:**
+   - In [WorkspaceView.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/WorkspaceView.tsx) and [ActionModals.tsx](file:///d:/CODE/antigravity%20compainion/packages/web/src/components/ActionModals.tsx), `workspaceFiles` is wiped when `activeWorkspaceId` changes.
+   - The Workspace Explorer modal displays the active workspace repository name (`Workspace Explorer (${activeWorkspaceName})`).

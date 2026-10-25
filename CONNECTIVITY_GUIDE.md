@@ -52,7 +52,7 @@ To eliminate the "desktop freeze" when you are sitting at your desk:
 
 ### Direct Download Links
 Download the latest assembled APK directly from your running daemon:
-- **Over Tailscale**: `http://100.107.129.104:4040/download/app.apk`
+- **Over Tailscale**: `http://<your-tailscale-ip>:4040/download/app.apk`
 - **Over Cloudflare**: `https://<tunnel-url>/download/app.apk`
 
 ### Android Permissions & Background Service
@@ -92,3 +92,30 @@ Download the latest assembled APK directly from your running daemon:
 | **Notification Allow doesn't resolve** | WebSocket reconnect delay | Resolved in v0.1.1: Approvals automatically use a secondary HTTP POST fallback (`/api/hook/approval`). |
 | **Double prompt in PC IDE** | Missing permission grant | Resolved in v0.1.1: `interceptor.js` forwards `permissionOverrides` on allow. |
 | **App asleep when phone locked** | Android OS background killing | Set App Battery to Unrestricted in Android Settings. |
+
+---
+
+## 7. Remote Power Management (Smart Plug & Cold Boot Blueprint)
+
+When you are away from home, your PC is off, and you are behind an ISP CGNAT (like ACT Fibernet), software Tailscale is dead and raw WoL broadcast packets cannot cross the public cellular internet. 
+
+The standard hardware-level solution is a smart plug using the motherboard's AC recovery policy.
+
+### Setup Steps (When Smart Plug Arrives):
+
+1. **BIOS / UEFI Configuration**:
+   - Reboot PC, press `Del` or `F2` to enter BIOS.
+   - Go to **Advanced** ➔ **Power Management Setup** (or **APM Configuration**).
+   - Locate **`Restore on AC/Power Loss`** (also labeled `AC Back` / `State After G3`).
+   - Change from *Power Off* to **`Power On`** (or *Always On*). Save and exit (`F10`).
+
+2. **Windows Tailscale Service & Auto-Start**:
+   - Ensure Tailscale is installed as an unattended Windows Service (`tailscale set --unattended` or default Windows installer).
+   - This ensures Tailscale connects to your mesh immediately at the Windows login lockscreen before any user logs in.
+
+3. **Remote Wake Workflow (From 50+ km away on Cellular)**:
+   - In your smart plug app (Tuya / Smart Life / Tapo), toggle the plug **OFF**, then **ON**.
+   - Power flows into the PC power supply.
+   - The motherboard detects incoming AC power and triggers a hardware cold boot automatically.
+   - Within 20-30 seconds, Windows boots, Tailscale connects, and your Companion Mobile app reconnects automatically.
+

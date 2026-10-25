@@ -10,3 +10,7 @@ build/
 **/android/app/build/
 **/android/.gradle/
 **/android/build/
+.agy-companion-mode
+.agy-companion-roots.json
+.agy-companion-recent.json
+*.apk

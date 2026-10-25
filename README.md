@@ -20,7 +20,7 @@ From this directory, run:
 ```bash
 npm start
 ```
-- Your terminal will display an **ASCII QR Code** and the local URL (e.g. `http://192.168.1.37:4040/`).
+- Your terminal will display an **ASCII QR Code** and the local URL (e.g. `http://<lan-or-tailscale-ip>:4040/`).
 - Scan the QR code with your phone camera (on the same Wi-Fi) or open the URL in your mobile browser.
 - Tap **Add to Home Screen** for an instant fullscreen companion app.
 
