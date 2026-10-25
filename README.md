@@ -27,7 +27,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/banner.jpg" alt="Kyber Interface Showcase" width="100%" />
+  <img src="assets/banner.svg" alt="Kyber Interface Showcase" width="100%" />
 </p>
 
 ---
@@ -51,7 +51,7 @@ Choose the setup that fits your workflow. Zero cloud subscriptions, zero configu
 ### Method 1: Windows 1-Liner (Recommended)
 Open PowerShell and run the self-install command:
 ```powershell
-irm https://raw.githubusercontent.com/anshul/kyber/master/install.ps1 | iex
+irm https://raw.githubusercontent.com/anshul-jpg/Kyber/main/install.ps1 | iex
 ```
 *(Or locally from cloned repo: `powershell -ExecutionPolicy Bypass -File .\install.ps1`)*
 
@@ -191,8 +191,8 @@ kyber/
 
 ```bash
 # Clone and install dependencies
-git clone https://github.com/<your-username>/kyber.git
-cd kyber
+git clone https://github.com/anshul-jpg/Kyber.git
+cd Kyber
 npm install
 
 # Run complete test suite (12 tests)

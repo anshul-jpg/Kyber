@@ -82,7 +82,7 @@ if (Test-Path $LocalVsix) {
     Write-Info "Checking for remote release on GitHub..."
     $TempVsix = Join-Path $env:TEMP "kyber-companion.vsix"
     try {
-        $ReleaseUrl = "https://github.com/anshul/kyber/releases/latest/download/antigravity-companion-0.1.0.vsix"
+        $ReleaseUrl = "https://github.com/anshul-jpg/Kyber/releases/latest/download/antigravity-companion-0.1.0.vsix"
         Invoke-WebRequest -Uri $ReleaseUrl -OutFile $TempVsix -UseBasicParsing -ErrorAction Stop
         $TargetVsix = $TempVsix
         Write-Success "Downloaded release bundle to $TempVsix"
