@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="48" height="48" fill="none">
+  <!-- Left Staggered Facet (Pure White) -->
+  <polygon points="48.5,18 22,58 48.5,98" fill="#ffffff" />
+  <!-- Right Elevated Facet (Platinum Titanium) -->
+  <polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa" opacity="0.8" />
+</svg>
