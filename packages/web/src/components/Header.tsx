@@ -123,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
         }}
       >
         {/* Left: Active Workspace Pill / Multi-Window Switcher */}
-        <div style={{ position: 'relative', maxWidth: onSelectSegment ? '38%' : '62%', minWidth: 0, flexShrink: 1 }}>
+        <div style={{ position: 'relative', flex: '1 1 auto', minWidth: 0, maxWidth: onSelectSegment ? '50%' : '75%' }}>
           <div
             onClick={() => {
               const next = !showWorkspaceDropdown;
@@ -243,9 +243,32 @@ export const Header: React.FC<HeaderProps> = ({
                     />
                     IDE Session
                   </span>
-                  <span style={{ color: ideStatus === 'dormant' ? '#fbbf24' : '#10b981', fontWeight: 600 }}>
-                    {ideStatus === 'dormant' ? 'Dormant (Buffering)' : 'Active & Synced'}
-                  </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ color: ideStatus === 'dormant' ? '#fbbf24' : '#10b981', fontWeight: 600 }}>
+                      {ideStatus === 'dormant' ? 'Dormant' : 'Active & Synced'}
+                    </span>
+                    {ideStatus === 'dormant' && onRestartIde && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          triggerHaptic(30);
+                          onRestartIde();
+                        }}
+                        style={{
+                          background: '#0078d4',
+                          border: 'none',
+                          borderRadius: '4px',
+                          color: '#ffffff',
+                          fontSize: '10.5px',
+                          fontWeight: 600,
+                          padding: '2px 8px',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Launch
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div
@@ -411,46 +434,6 @@ export const Header: React.FC<HeaderProps> = ({
             </>
           )}
         </div>
-
-        {/* If IDE is Dormant: Compact warning chip */}
-        {ideStatus === 'dormant' && (
-          <div
-            title="Antigravity IDE window is closed or reloading. Tap to launch and reconnect."
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px',
-              padding: '2px 7px',
-              borderRadius: '6px',
-              background: 'rgba(245, 158, 11, 0.12)',
-              border: '1px solid rgba(245, 158, 11, 0.28)',
-              fontSize: '10.5px',
-              fontWeight: 600,
-              color: '#fbbf24',
-              flexShrink: 0,
-              userSelect: 'none',
-              marginLeft: '6px',
-              cursor: onRestartIde ? 'pointer' : 'default',
-            }}
-            onClick={() => {
-              if (onRestartIde) {
-                triggerHaptic(30);
-                onRestartIde();
-              }
-            }}
-          >
-            <span
-              style={{
-                width: '5px',
-                height: '5px',
-                borderRadius: '50%',
-                background: '#f59e0b',
-                boxShadow: '0 0 5px rgba(245, 158, 11, 0.6)',
-              }}
-            />
-            <span style={{ letterSpacing: '0.01em' }}>Dormant · Launch</span>
-          </div>
-        )}
 
         {/* Center: Unified 2-Pillar Switcher (Chat | Workspace) */}
         {onSelectSegment && (

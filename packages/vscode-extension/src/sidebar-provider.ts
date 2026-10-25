@@ -62,6 +62,15 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
         case 'setMode':
           this.daemonManager.setMode(data.mode);
           break;
+        case 'setExecutionPolicy':
+          this.daemonManager.setExecutionPolicy(data.policy);
+          this.updateWebview();
+          break;
+        case 'openUrl':
+          if (data.url) {
+            vscode.env.openExternal(vscode.Uri.parse(data.url));
+          }
+          break;
         case 'selectEndpoint':
           this.activeEndpointType = data.endpointType;
           this.updateWebview();
@@ -218,6 +227,7 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
       isHookInstalled,
       isGlobalHookInstalled: this.hookManager.isInstalledGlobally(),
       activeEndpointType: this.activeEndpointType,
+      executionPolicy: this.daemonManager.getExecutionPolicy(),
       qrSvg,
     });
   }

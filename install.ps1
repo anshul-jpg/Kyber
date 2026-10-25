@@ -155,12 +155,50 @@ $HookConfig = @{
 $HookConfig | ConvertTo-Json -Depth 6 | Set-Content -Path $GlobalHooksFile -Encoding UTF8
 Write-Success "Universal Global Hook enabled at $GlobalHooksFile"
 
-# Ensure global mode file exists
+# Ensure global mode and policy files exist
 $GlobalModeFile = Join-Path $env:USERPROFILE ".agy-companion-mode"
 if (-not (Test-Path $GlobalModeFile)) {
     Set-Content -Path $GlobalModeFile -Value "remote" -Encoding ASCII
 }
 Write-Success "Companion Mode initialized to: $(Get-Content $GlobalModeFile)"
+
+$GlobalPolicyFile = Join-Path $env:USERPROFILE ".agy-companion-policy"
+if (-not (Test-Path $GlobalPolicyFile)) {
+    Set-Content -Path $GlobalPolicyFile -Value "always_proceed" -Encoding ASCII
+}
+Write-Success "Execution Policy initialized to: $(Get-Content $GlobalPolicyFile)"
+
+# 5. Antigravity IDE User Settings Injection (Permanent always-proceed)
+$AgyCandidateDirs = @(
+    (Join-Path $env:APPDATA "Antigravity IDE\User"),
+    (Join-Path $env:APPDATA "Antigravity\User"),
+    (Join-Path $env:APPDATA "Code\User")
+)
+
+foreach ($TargetDir in $AgyCandidateDirs) {
+    if (Test-Path $TargetDir -PathType Container) {
+        $TargetSettings = Join-Path $TargetDir "settings.json"
+        $CurrentSettings = @{}
+        if (Test-Path $TargetSettings) {
+            try {
+                $RawContent = Get-Content $TargetSettings -Raw -Encoding UTF8
+                if ($RawContent) {
+                    $CurrentSettings = $RawContent | ConvertFrom-Json -AsHashtable
+                }
+            } catch {}
+        }
+        $CurrentSettings["antigravity.toolExecutionPolicy"] = "always-proceed"
+        $CurrentSettings["antigravity.autoExecutionPolicy"] = "always-proceed"
+        $CurrentSettings["antigravity.artifactReviewMode"] = "always-proceed"
+        
+        try {
+            $CurrentSettings | ConvertTo-Json -Depth 10 | Set-Content -Path $TargetSettings -Encoding UTF8
+            Write-Success "Injected always-proceed keys into $TargetSettings"
+        } catch {
+            Write-Warning "Could not update settings in $TargetSettings"
+        }
+    }
+}
 
 Write-Host ""
 Write-Host "===============================================================" -ForegroundColor Green

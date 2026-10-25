@@ -18,6 +18,9 @@ import {
   Cpu,
   AlertTriangle,
   OctagonAlert,
+  Camera,
+  Download,
+  X,
 } from 'lucide-react';
 import { decodePairingTicket, ExecutionPolicy, CompanionMode, AgentQuota, HostTelemetry } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
@@ -77,6 +80,103 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 }) => {
   const [ticketInput, setTicketInput] = useState<string>('');
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState<boolean>(false);
+  const [scannerError, setScannerError] = useState<string | null>(null);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+  const scannerStreamRef = React.useRef<MediaStream | null>(null);
+
+  const applyPairingTicket = (ticketStr: string): boolean => {
+    let cleanTicket = ticketStr.trim();
+    if (cleanTicket.includes('ticket=')) {
+      try {
+        const u = new URL(cleanTicket);
+        cleanTicket = u.searchParams.get('ticket') || cleanTicket;
+      } catch {
+        const match = cleanTicket.match(/ticket=([^&\s]+)/);
+        if (match) cleanTicket = match[1];
+      }
+    }
+    const parsed = decodePairingTicket(cleanTicket);
+    if (parsed) {
+      setHost(parsed.host);
+      setPort(parsed.port.toString());
+      localStorage.setItem('agy_host', parsed.host);
+      localStorage.setItem('agy_port', parsed.port.toString());
+      localStorage.setItem('agy_token', parsed.token);
+      localStorage.setItem('agy_ssl', parsed.ssl ? 'true' : 'false');
+      setTicketFeedback('Paired successfully!');
+      triggerHaptic([30, 30]);
+      stopScanner();
+      setTimeout(() => {
+        onClose();
+        onSaveAndReconnect();
+      }, 500);
+      return true;
+    }
+    return false;
+  };
+
+  const startScanner = async () => {
+    setScannerError(null);
+    setIsScanning(true);
+    triggerHaptic(20);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+      });
+      scannerStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      }
+    } catch {
+      setScannerError('Camera access unavailable or permission denied.');
+    }
+  };
+
+  const stopScanner = () => {
+    if (scannerStreamRef.current) {
+      scannerStreamRef.current.getTracks().forEach(t => t.stop());
+      scannerStreamRef.current = null;
+    }
+    setIsScanning(false);
+  };
+
+  useEffect(() => {
+    let animId: number;
+    let detector: any = null;
+    if (typeof window !== 'undefined' && (window as any).BarcodeDetector) {
+      try {
+        detector = new (window as any).BarcodeDetector({ formats: ['qr_code'] });
+      } catch {}
+    }
+
+    const checkFrame = async () => {
+      if (isScanning && videoRef.current && detector && videoRef.current.readyState >= 2) {
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes && codes.length > 0 && codes[0].rawValue) {
+            const success = applyPairingTicket(codes[0].rawValue);
+            if (success) return;
+          }
+        } catch {}
+      }
+      if (isScanning) {
+        animId = requestAnimationFrame(checkFrame);
+      }
+    };
+
+    if (isScanning) {
+      animId = requestAnimationFrame(checkFrame);
+    }
+    return () => {
+      cancelAnimationFrame(animId);
+      if (scannerStreamRef.current) {
+        scannerStreamRef.current.getTracks().forEach(t => t.stop());
+        scannerStreamRef.current = null;
+      }
+    };
+  }, [isScanning]);
   const [batteryFeedback, setBatteryFeedback] = useState<string | null>(null);
   const [wolMac, setWolMac] = useState<string>(() => localStorage.getItem('agy_wol_mac') || '');
   const [wolBroadcast, setWolBroadcast] = useState<string>(() => localStorage.getItem('agy_wol_broadcast') || '255.255.255.255');
@@ -709,7 +809,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px',
+              gap: '10px',
               background: '#1e1e1e',
               padding: '12px',
               borderRadius: '8px',
@@ -739,21 +839,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  const parsed = decodePairingTicket(ticketInput);
-                  if (parsed) {
-                    setHost(parsed.host);
-                    setPort(parsed.port.toString());
-                    localStorage.setItem('agy_host', parsed.host);
-                    localStorage.setItem('agy_port', parsed.port.toString());
-                    localStorage.setItem('agy_token', parsed.token);
-                    localStorage.setItem('agy_ssl', parsed.ssl ? 'true' : 'false');
-                    setTicketFeedback('Paired successfully!');
-                    triggerHaptic([30, 30]);
-                    setTimeout(() => {
-                      onClose();
-                      onSaveAndReconnect();
-                    }, 500);
-                  } else {
+                  const success = applyPairingTicket(ticketInput);
+                  if (!success) {
                     setTicketFeedback('Invalid pairing ticket format');
                     triggerHaptic(50);
                   }
@@ -774,6 +861,78 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Pair
               </button>
             </div>
+
+            {/* In-App Camera QR Code Scanner Trigger */}
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                onClick={startScanner}
+                style={{
+                  flex: 1,
+                  background: '#242426',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '6px',
+                  padding: '10px 14px',
+                  color: '#ffffff',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '7px',
+                }}
+              >
+                <Camera size={14} color="#007acc" />
+                <span>Scan PC QR Code</span>
+              </button>
+            </div>
+
+            {/* Direct Android APK Download Banner */}
+            <div style={{ display: 'flex', gap: '8px', paddingTop: '6px', borderTop: '1px solid rgba(255, 255, 255, 0.06)' }}>
+              <a
+                href={`http://${host || '127.0.0.1'}:${port || '4040'}/download/app.apk`}
+                download="kyber-companion.apk"
+                style={{
+                  flex: 1,
+                  background: '#141414',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  color: '#e2e8f0',
+                  fontSize: '11px',
+                  fontWeight: 500,
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}
+              >
+                <Download size={13} color="#0078d4" />
+                <span>Download Android APK</span>
+              </a>
+              <a
+                href="https://github.com/anshul-jpg/Kyber/releases"
+                target="_blank"
+                rel="noreferrer"
+                style={{
+                  background: 'transparent',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  color: '#94a3b8',
+                  fontSize: '11px',
+                  textDecoration: 'none',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                Releases ↗
+              </a>
+            </div>
+
             {ticketFeedback && (
               <span
                 style={{
@@ -784,7 +943,88 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 {ticketFeedback}
               </span>
             )}
+
+            {scannerError && (
+              <span style={{ fontSize: '11px', color: '#f87171' }}>
+                {scannerError}
+              </span>
+            )}
           </div>
+
+          {/* Fullscreen Camera Viewfinder Modal */}
+          {isScanning && (
+            <div
+              style={{
+                position: 'fixed',
+                inset: 0,
+                zIndex: 150,
+                background: '#000000',
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <div
+                style={{
+                  padding: '16px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: 'rgba(0,0,0,0.8)',
+                  zIndex: 10,
+                }}
+              >
+                <span style={{ color: '#ffffff', fontSize: '14px', fontWeight: 600 }}>
+                  Point Camera at PC QR Code
+                </span>
+                <button
+                  type="button"
+                  onClick={stopScanner}
+                  style={{
+                    background: 'rgba(255, 255, 255, 0.15)',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: '36px',
+                    height: '36px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <video
+                  ref={videoRef}
+                  playsInline
+                  muted
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    objectFit: 'cover',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    width: '240px',
+                    height: '240px',
+                    border: '2px solid #0078d4',
+                    borderRadius: '16px',
+                    boxShadow: '0 0 0 4000px rgba(0, 0, 0, 0.55)',
+                    pointerEvents: 'none',
+                  }}
+                />
+              </div>
+
+              <div style={{ padding: '16px', textAlign: 'center', background: 'rgba(0,0,0,0.8)', color: '#a0a0a0', fontSize: '12px' }}>
+                Hold steady over the QR code in the VS Code KYBER sidebar.
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Section 4: Connection & Presets */}

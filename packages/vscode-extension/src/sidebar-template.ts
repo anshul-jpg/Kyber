@@ -1,4 +1,4 @@
-import { ApprovalRequest, QuickAction } from '@agy-companion/protocol';
+import { ApprovalRequest, QuickAction, ExecutionPolicy } from '@agy-companion/protocol';
 import { DaemonStatus, CompanionMode, PairingEndpoint, LogLine, MeshStatus } from './types';
 
 export interface SidebarRenderContext {
@@ -14,6 +14,7 @@ export interface SidebarRenderContext {
   isHookInstalled: boolean;
   isGlobalHookInstalled?: boolean;
   activeEndpointType: 'local' | 'tailscale' | 'cloudflare';
+  executionPolicy?: ExecutionPolicy;
   qrSvg: string;
 }
 
@@ -40,6 +41,7 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
     isHookInstalled,
     isGlobalHookInstalled = false,
     activeEndpointType,
+    executionPolicy = 'always_proceed',
     qrSvg,
   } = ctx;
 
@@ -606,6 +608,16 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
     </button>
   </div>
 
+  <!-- Execution Policy (Autonomous vs Force Ask) -->
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px;">
+    <button class="mode-btn ${executionPolicy === 'always_proceed' ? 'active' : ''}" style="${executionPolicy === 'always_proceed' ? 'background: #0078d4; color: #ffffff;' : 'background: rgba(255,255,255,0.03);'}" onclick="sendMsg('setExecutionPolicy', { policy: 'always_proceed' })">
+      ⚡ Autonomous
+    </button>
+    <button class="mode-btn ${executionPolicy === 'force_ask' ? 'active' : ''}" style="${executionPolicy === 'force_ask' ? 'background: #f59e0b; color: #000000; font-weight: 600;' : 'background: rgba(255,255,255,0.03);'}" onclick="sendMsg('setExecutionPolicy', { policy: 'force_ask' })">
+      🛡️ Force Ask
+    </button>
+  </div>
+
   <!-- Pending Approvals Alert (if any) -->
   ${approvals.length > 0 ? `
     <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; padding: 0 2px;">
@@ -660,6 +672,16 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
         <button class="btn-secondary" onclick="sendMsg('copyText', { text: '${currentEndpoint.url}', label: 'Companion URL' })">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           Copy Direct URL
+        </button>
+      </div>
+
+      <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle); display: flex; flex-direction: column; gap: 5px;">
+        <button class="btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 6px; font-weight: 600;" onclick="sendMsg('openUrl', { url: 'http://127.0.0.1:4040/download/app.apk' })">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download Android APK
+        </button>
+        <button class="btn-secondary" style="font-size: 10px;" onclick="sendMsg('openUrl', { url: 'https://github.com/anshul-jpg/Kyber/releases' })">
+          View Releases on GitHub
         </button>
       </div>
     ` : `

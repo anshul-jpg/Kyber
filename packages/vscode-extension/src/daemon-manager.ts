@@ -16,6 +16,7 @@ import {
   encodePairingTicket,
   QuickAction,
   EditorTab,
+  ExecutionPolicy,
 } from '@agy-companion/protocol';
 import { DaemonStatus, PairingEndpoint, ConnectedDevice, CompanionMode, MeshStatus, LogLine } from './types';
 
@@ -441,6 +442,30 @@ export class DaemonManager extends EventEmitter {
     const next = cycle[(cycle.indexOf(this.currentMode) + 1) % cycle.length];
     this.setMode(next);
     return next;
+  }
+
+  public getExecutionPolicy(): ExecutionPolicy {
+    try {
+      const globalPolicy = path.resolve(os.homedir(), '.agy-companion-policy');
+      if (fs.existsSync(globalPolicy)) {
+        const val = fs.readFileSync(globalPolicy, 'utf8').trim().toLowerCase();
+        if (val === 'force_ask' || val === 'always_proceed') return val as ExecutionPolicy;
+      }
+    } catch {}
+    return 'always_proceed';
+  }
+
+  public setExecutionPolicy(policy: ExecutionPolicy): void {
+    const globalPolicy = path.resolve(os.homedir(), '.agy-companion-policy');
+    try {
+      fs.writeFileSync(globalPolicy, policy, 'utf8');
+    } catch {}
+    if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
+      const msg: any = { type: 'client:set_execution_policy', policy };
+      this.wsClient.send(JSON.stringify(msg));
+    }
+    this.addLogLine(`[Policy Switch] Execution policy set to: ${policy}`, 'info');
+    this.emit('status_changed', this.status);
   }
 
   public resolveApproval(requestId: string, decision: 'allow' | 'deny'): void {
