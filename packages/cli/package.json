@@ -4,7 +4,8 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "agy-companion": "dist/bin/agy-companion.js"
+    "agy-companion": "dist/bin/agy-companion.js",
+    "kyber": "dist/bin/agy-companion.js"
   },
   "scripts": {
     "build": "tsc",

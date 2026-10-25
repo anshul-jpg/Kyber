@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.antigravity.companion"
+    namespace = "com.kyber.companion"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.antigravity.companion"
+        applicationId "com.kyber.companion"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

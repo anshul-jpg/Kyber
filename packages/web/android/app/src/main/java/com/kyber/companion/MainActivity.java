@@ -1,4 +1,4 @@
-package com.antigravity.companion;
+package com.kyber.companion;
 
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
@@ -218,7 +218,7 @@ public class MainActivity extends BridgeActivity {
                 }
 
                 DownloadManager.Request request = new DownloadManager.Request(Uri.parse(downloadUrl));
-                request.setTitle("Antigravity Companion Update");
+                request.setTitle("KYBER Update");
                 request.setDescription("Downloading latest build...");
                 request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                 request.setDestinationInExternalFilesDir(this, Environment.DIRECTORY_DOWNLOADS, "update.apk");

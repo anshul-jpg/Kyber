@@ -1,4 +1,4 @@
-package com.antigravity.companion;
+package com.kyber.companion;
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -21,10 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class CompanionForegroundService extends Service {
-    public static final String CHANNEL_ID = "antigravity_companion_channel_v3";
+    public static final String CHANNEL_ID = "kyber_companion_channel_v1";
     public static final int NOTIFICATION_ID = 9001;
-    public static final String ACTION_UPDATE_STATUS = "com.antigravity.companion.UPDATE_STATUS";
-    public static final String ACTION_DECISION = "com.antigravity.companion.DECISION";
+    public static final String ACTION_UPDATE_STATUS = "com.kyber.companion.UPDATE_STATUS";
+    public static final String ACTION_DECISION = "com.kyber.companion.DECISION";
 
     private PowerManager.WakeLock wakeLock;
     private NotificationManager notificationManager;
@@ -47,7 +47,7 @@ public class CompanionForegroundService extends Service {
                 if (decision != null && requestId != null) {
                     resolveDecision(requestId, decision);
                     updateNotification(
-                        "Antigravity IDE",
+                        "KYBER",
                         "Approval " + decision.toUpperCase() + " — Processing...",
                         null,
                         false
@@ -61,7 +61,7 @@ public class CompanionForegroundService extends Service {
                 boolean isAlert = intent.getBooleanExtra("isAlert", false);
                 String subtext = intent.getStringExtra("subtext");
                 updateNotification(
-                    title != null ? title : "Antigravity IDE",
+                    title != null ? title : "KYBER",
                     content != null ? content : "Remote Active — Ready",
                     requestId,
                     isAlert,
@@ -73,7 +73,7 @@ public class CompanionForegroundService extends Service {
 
         // Default initial boot notification
         updateNotification(
-            "Antigravity Companion",
+            "KYBER",
             "Remote Active — Ready",
             null,
             false
@@ -245,7 +245,7 @@ public class CompanionForegroundService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "Antigravity Companion Service",
+                "KYBER Service",
                 NotificationManager.IMPORTANCE_HIGH
             );
             channel.setDescription("Maintains single persistent notification for remote approvals & agent status");
@@ -262,7 +262,7 @@ public class CompanionForegroundService extends Service {
             if (powerManager != null) {
                 wakeLock = powerManager.newWakeLock(
                     PowerManager.PARTIAL_WAKE_LOCK,
-                    "AntigravityCompanion::KeepAliveWakeLock"
+                    "KYBERCompanion::KeepAliveWakeLock"
                 );
                 wakeLock.acquire();
             }

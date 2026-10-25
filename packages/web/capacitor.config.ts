@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.antigravity.companion',
+  appId: 'com.kyber.companion',
   appName: 'KYBER',
   webDir: 'dist',
   server: {
