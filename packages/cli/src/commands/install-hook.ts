@@ -3,16 +3,17 @@ import path from 'path';
 import os from 'os';
 import { fileURLToPath } from 'url';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(_filename);
 
 export function getCanonicalInterceptorCode(): string {
   const candidatePaths = [
-    path.resolve(__dirname, '../../assets/interceptor.js'),
-    path.resolve(__dirname, '../../../packages/cli/assets/interceptor.js'),
+    path.resolve(_dirname, '../assets/interceptor.js'),
+    path.resolve(_dirname, '../../assets/interceptor.js'),
+    path.resolve(_dirname, '../../../packages/cli/assets/interceptor.js'),
     path.resolve(process.cwd(), 'packages/cli/assets/interceptor.js'),
     path.resolve(process.cwd(), 'assets/interceptor.js'),
-    path.resolve(__dirname, '../../media/interceptor.js'),
+    path.resolve(_dirname, '../../media/interceptor.js'),
   ];
   for (const p of candidatePaths) {
     if (fs.existsSync(p)) {

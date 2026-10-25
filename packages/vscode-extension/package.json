@@ -3,7 +3,7 @@
   "displayName": "KYBER",
   "description": "Autonomous Pocket Supervisor & Tool Gatekeeper for Antigravity, Codex & Claude Code",
   "version": "0.1.0",
-  "publisher": "antigravity",
+  "publisher": "anshul",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -16,7 +16,10 @@
     "onStartupFinished"
   ],
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build:extension": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "build:daemon": "esbuild ../cli/src/bin/agy-companion.ts --bundle --outfile=dist/daemon/daemon.js --platform=node --target=node18 --format=cjs",
+    "bundle:assets": "node scripts/bundle-all.js",
+    "build": "npm run build:extension && npm run build:daemon && npm run bundle:assets",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "package": "npm run build && npx @vscode/vsce package --no-dependencies"
   },

@@ -32,10 +32,23 @@ import { killStalePort } from './port-cleaner.js';
 import { handleHttpRequest } from './http-api.js';
 import { CodeRootsManager } from '../session/code-roots.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-// Resolve path to packages/web/dist
-const WEB_DIST_PATH = path.resolve(__dirname, '../../../web/dist');
+const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(_filename);
+
+function getWebDistPath(): string {
+  const candidates = [
+    process.env.KYBER_WEB_DIST,
+    path.resolve(_dirname, '../web'),
+    path.resolve(_dirname, '../../web/dist'),
+    path.resolve(_dirname, '../../../web/dist'),
+  ].filter(Boolean) as string[];
+
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return path.resolve(_dirname, '../web');
+}
+const WEB_DIST_PATH = getWebDistPath();
 
 export class WsGateway {
   private httpServer: http.Server | null = null;
@@ -158,8 +171,13 @@ export class WsGateway {
 
   public getApkDetails(): { hasApk: boolean; apkBuildTime?: number; size?: number } {
     try {
-      const apkPath = path.resolve(__dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk');
-      if (fs.existsSync(apkPath)) {
+      const candidateApkPaths = [
+        path.resolve(_dirname, '../apk/app-debug.apk'),
+        path.resolve(_dirname, '../web/app-debug.apk'),
+        path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+      ];
+      const apkPath = candidateApkPaths.find(p => fs.existsSync(p));
+      if (apkPath) {
         const stat = fs.statSync(apkPath);
         return { hasApk: true, apkBuildTime: stat.mtimeMs, size: stat.size };
       }

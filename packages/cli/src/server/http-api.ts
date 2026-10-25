@@ -9,8 +9,8 @@ import { closeProvider, restartProvider, getHostTelemetry } from '../provider/pr
 import { getWorkspaceGitChanges } from '../hooks/ipc-server.js';
 import type { WsGateway } from './ws-gateway.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
+const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(_filename);
 
 export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage, res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -831,8 +831,13 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
 
   // Serve compiled Android APK
   if (url === '/download/app.apk' || url === '/app.apk') {
-    const apkPath = path.resolve(__dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk');
-    if (fs.existsSync(apkPath)) {
+    const candidateApkPaths = [
+      path.resolve(_dirname, '../apk/app-debug.apk'),
+      path.resolve(_dirname, '../web/app-debug.apk'),
+      path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+    ];
+    const apkPath = candidateApkPaths.find(p => fs.existsSync(p));
+    if (apkPath) {
       const stat = fs.statSync(apkPath);
       res.writeHead(200, {
         'Content-Type': 'application/vnd.android.package-archive',

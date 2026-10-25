@@ -337,11 +337,14 @@ export class DaemonManager extends EventEmitter {
     }
 
     try {
-      this.daemonProcess = spawn('node', args, {
+      const nodeExe = this.resolveNodeExecutable();
+      const isElectronNode = nodeExe === process.execPath;
+      this.daemonProcess = spawn(nodeExe, args, {
         cwd: workspaceRoot || os.homedir(),
         env: {
           ...process.env,
           ANTIGRAVITY_IDE_EXEC_PATH: process.execPath,
+          ...(isElectronNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}),
         },
         detached: true,
         shell: false,
@@ -557,9 +560,22 @@ export class DaemonManager extends EventEmitter {
     }
   }
 
+  private resolveNodeExecutable(): string {
+    try {
+      execSync('node -v', { stdio: 'ignore' });
+      return 'node';
+    } catch {
+      return process.execPath;
+    }
+  }
+
   private findDaemonScript(): string | null {
+    const extDaemon = path.join(this.context.extensionPath, 'dist', 'daemon', 'daemon.js');
+    const localDistDaemon = path.resolve(__dirname, 'daemon', 'daemon.js');
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const candidatePaths = [
+      extDaemon,
+      localDistDaemon,
       workspaceRoot ? path.join(workspaceRoot, 'packages', 'cli', 'dist', 'bin', 'agy-companion.js') : '',
       path.resolve(__dirname, '..', '..', 'cli', 'dist', 'bin', 'agy-companion.js'),
       path.resolve(__dirname, '..', 'cli', 'dist', 'bin', 'agy-companion.js'),
