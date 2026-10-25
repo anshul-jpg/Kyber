@@ -123,7 +123,7 @@ public class CompanionForegroundService extends Service {
             .setContentText(cleanContent)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(cleanContent))
             .setSubText(subtext != null ? subtext : "Remote Active")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(!isAlert);
@@ -201,7 +201,6 @@ public class CompanionForegroundService extends Service {
                 }
             } catch (Exception ignored) {}
 
-            endpoints.add("http://100.107.129.104:4040/api/hook/approval");
             endpoints.add("http://127.0.0.1:4040/api/hook/approval");
             endpoints.add("http://127.0.0.1:4041/api/hook/approval");
 

@@ -52,14 +52,31 @@ public class MainActivity extends BridgeActivity {
     }
 
     @JavascriptInterface
+    public void setKeepScreenOn(boolean keepOn) {
+        runOnUiThread(() -> {
+            try {
+                if (keepOn) {
+                    getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                } else {
+                    getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        });
+    }
+
+    @JavascriptInterface
     public void startVoiceInput() {
         runOnUiThread(() -> {
             try {
+                getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
                 intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak prompt for Antigravity...");
                 startActivityForResult(intent, REQUEST_CODE_SPEECH_INPUT);
             } catch (Exception e) {
+                getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
                 e.printStackTrace();
                 notifyVoiceInputResult(null, e.getMessage());
             }
@@ -69,11 +86,14 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == REQUEST_CODE_SPEECH_INPUT && resultCode == RESULT_OK && data != null) {
-            ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
-            if (results != null && !results.isEmpty()) {
-                String spokenText = results.get(0);
-                notifyVoiceInputResult(spokenText, null);
+        if (requestCode == REQUEST_CODE_SPEECH_INPUT) {
+            getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (results != null && !results.isEmpty()) {
+                    String spokenText = results.get(0);
+                    notifyVoiceInputResult(spokenText, null);
+                }
             }
         }
     }
@@ -282,6 +302,18 @@ public class MainActivity extends BridgeActivity {
                 String safeStatus = status.replace("'", "\\'");
                 String js = "window.dispatchEvent(new CustomEvent('apk_update_progress', { detail: { percent: " + percent + ", status: '" + safeStatus + "' } }));";
                 getBridge().getWebView().evaluateJavascript(js, null);
+            }
+        });
+    }
+
+    @Override
+    public void onBackPressed() {
+        runOnUiThread(() -> {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                String js = "window.dispatchEvent(new CustomEvent('android_back_pressed'));";
+                getBridge().getWebView().evaluateJavascript(js, null);
+            } else {
+                super.onBackPressed();
             }
         });
     }

@@ -38,11 +38,17 @@ export class DaemonManager extends EventEmitter {
   private cloudflareActive: boolean = false;
   private cloudflareUrl: string | null = null;
   private lastActivityTimestamp: number = Date.now();
+  private userExplicitlyStopped: boolean = false;
+  private pendingDialogResolvers: Map<string, (choice: { decision: string; option?: number }) => void> = new Map();
 
   constructor(private context: vscode.ExtensionContext) {
     super();
     this.outputChannel = vscode.window.createOutputChannel('Antigravity Companion');
     this.loadGlobalMode();
+  }
+
+  public isUserExplicitlyStopped(): boolean {
+    return this.userExplicitlyStopped;
   }
 
   public getStatus(): DaemonStatus {
@@ -269,6 +275,7 @@ export class DaemonManager extends EventEmitter {
   }
 
   public async start(): Promise<void> {
+    this.userExplicitlyStopped = false;
     if (this.status === 'running' || this.status === 'starting') {
       return;
     }
@@ -315,7 +322,11 @@ export class DaemonManager extends EventEmitter {
     const tunnelProvider = config.get<string>('tunnelProvider', 'none');
     const cfSecretToken = await this.getCloudflareToken();
 
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     const args = [cliScript, '--port', String(port)];
+    if (workspaceRoot) {
+      args.push('--workspace', workspaceRoot);
+    }
     if (tunnelProvider === 'cloudflare') {
       if (cfSecretToken) {
         args.push('--cloudflare-token', cfSecretToken);
@@ -326,9 +337,8 @@ export class DaemonManager extends EventEmitter {
     }
 
     try {
-
       this.daemonProcess = spawn('node', args, {
-        cwd: path.dirname(cliScript),
+        cwd: workspaceRoot || os.homedir(),
         env: {
           ...process.env,
           ANTIGRAVITY_IDE_EXEC_PATH: process.execPath,
@@ -390,6 +400,7 @@ export class DaemonManager extends EventEmitter {
   }
 
   public async stop(): Promise<void> {
+    this.userExplicitlyStopped = true;
     this.outputChannel.appendLine('[Extension] Stopping Companion Daemon...');
     this.addLogLine('[Extension] Stopping Companion Daemon...', 'info');
     this.cleanup();
@@ -644,7 +655,7 @@ export class DaemonManager extends EventEmitter {
     }
   }
 
-  private cleanup() {
+  private cleanup(killProcess: boolean = true) {
     if (this.wsClient) {
       try {
         this.wsClient.close();
@@ -659,18 +670,20 @@ export class DaemonManager extends EventEmitter {
       clearInterval(this.idleTimer);
       this.idleTimer = null;
     }
-    if (this.daemonProcess) {
-      try {
-        this.daemonProcess.kill();
-      } catch {}
-      this.daemonProcess = null;
+    if (killProcess) {
+      if (this.daemonProcess) {
+        try {
+          this.daemonProcess.kill();
+        } catch {}
+        this.daemonProcess = null;
+      }
+      const config = vscode.workspace.getConfiguration('antigravityCompanion');
+      const port = config.get<number>('daemonPort', DEFAULT_DAEMON_PORT);
+      this.killProcessOnPort(port);
+      this.pendingApprovals.clear();
+      this.connectedDevices.clear();
+      this.phoneCount = 0;
     }
-    const config = vscode.workspace.getConfiguration('antigravityCompanion');
-    const port = config.get<number>('daemonPort', DEFAULT_DAEMON_PORT);
-    this.killProcessOnPort(port);
-    this.pendingApprovals.clear();
-    this.connectedDevices.clear();
-    this.phoneCount = 0;
   }
 
   private killProcessOnPort(port: number): void {
@@ -697,7 +710,8 @@ export class DaemonManager extends EventEmitter {
   }
 
   public dispose(): void {
-    this.cleanup();
+    // Window is closing or switching workspaces; preserve persistent companion daemon process
+    this.cleanup(false);
   }
 
   private connectInternalWebSocket(port: number) {
@@ -820,6 +834,11 @@ export class DaemonManager extends EventEmitter {
         this.pendingApprovals.delete(msg.requestId);
         this.emit('approvals_changed', this.getPendingApprovals());
         this.addLogLine(`[DECISION] Approval resolved: ${msg.decision.toUpperCase()}`, 'ipc');
+        const dialogResolver = this.pendingDialogResolvers.get(msg.requestId);
+        if (dialogResolver) {
+          this.pendingDialogResolvers.delete(msg.requestId);
+          dialogResolver({ decision: msg.decision, option: msg.option, reason: msg.reason });
+        }
         break;
 
       case 'server:mode_updated':
@@ -833,8 +852,7 @@ export class DaemonManager extends EventEmitter {
 
       case 'server:open_workspace':
         if (msg.path) {
-          this.addLogLine(`[Open Workspace] Switching IDE workspace in same window: ${msg.path}`, 'info');
-          vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(msg.path), { forceNewWindow: false });
+          this.handleWorkspaceSwitch(msg.path);
         }
         break;
 
@@ -859,6 +877,16 @@ export class DaemonManager extends EventEmitter {
         if (msg.path) {
           this.openEditorTab(msg.path);
         }
+        break;
+
+      case 'server:close_editor_tab':
+        if (msg.path) {
+          this.closeEditorTab(msg.path);
+        }
+        break;
+
+      case 'server:close_all_editor_tabs':
+        this.closeAllEditorTabs();
         break;
 
       case 'server:chat_message':
@@ -887,6 +915,139 @@ export class DaemonManager extends EventEmitter {
       this.addLogLine(`[Editor Tab] Switched active editor tab to: ${filePath}`, 'info');
     } catch (err: any) {
       this.addLogLine(`[Editor Tab] Failed to switch editor tab: ${err?.message || err}`, 'warn');
+    }
+  }
+
+  private async closeEditorTab(filePath: string): Promise<void> {
+    try {
+      const norm = path.resolve(filePath).toLowerCase();
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          if (tab.input instanceof vscode.TabInputText) {
+            if (path.resolve(tab.input.uri.fsPath).toLowerCase() === norm) {
+              await vscode.window.tabGroups.close(tab);
+            }
+          }
+        }
+      }
+    } catch (err: any) {
+      this.addLogLine(`[Editor Tab] Failed to close editor tab: ${err?.message || err}`, 'warn');
+    }
+  }
+
+  private async closeAllEditorTabs(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    } catch (err: any) {
+      this.addLogLine(`[Editor Tab] Failed to close all editor tabs: ${err?.message || err}`, 'warn');
+    }
+  }
+
+  private async handleWorkspaceSwitch(targetPath: string): Promise<void> {
+    try {
+      this.loadGlobalMode();
+      const mode = this.getEffectiveMode();
+      this.addLogLine(`[Open Workspace] Requested switch to: ${targetPath} (mode: ${mode})`, 'info');
+      const dirtyDocs = vscode.workspace.textDocuments.filter(d => d.isDirty);
+
+      if (dirtyDocs.length === 0) {
+        vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPath), false);
+        return;
+      }
+
+      // Desk mode: popup appears on desk only, taking input from desktop IDE
+      if (mode === 'desk') {
+        this.addLogLine('[Open Workspace] Desk mode: delegating confirmation dialog to desktop IDE.', 'info');
+        vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPath), false);
+        return;
+      }
+
+      // Remote mode: popup appears on phone only, taking input from phone with zero desktop prompts
+      const dialogId = `dialog_save_${Date.now()}`;
+      const fileNames = dirtyDocs.map(d => path.basename(d.fileName)).slice(0, 3).join(', ');
+      const extraCount = dirtyDocs.length > 3 ? ` and ${dirtyDocs.length - 3} more` : '';
+      const promptTitle = `Do you want to save the changes you made to ${fileNames}${extraCount}?`;
+      const promptDetail = "Your changes will be lost if you don't save them.";
+
+      if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
+        this.wsClient.send(
+          JSON.stringify({
+            type: 'client:prompt_dialog',
+            dialogId,
+            title: promptTitle,
+            message: promptDetail,
+            options: ['Save', "Don't Save", 'Cancel'],
+            workspacePath: targetPath,
+            dialogType: 'warning',
+          })
+        );
+
+        this.pendingDialogResolvers.set(dialogId, async (choice: { decision: string; option?: number; reason?: string }) => {
+          const opt = choice.option;
+          const reasonStr = (choice.reason || '').toLowerCase();
+          const isDontSave = opt === 2 || reasonStr.includes("don't save") || reasonStr.includes('dont save') || reasonStr.includes('discard');
+          const isSave = opt === 1 || choice.decision === 'allow' || reasonStr === 'save' || (reasonStr.includes('save') && !reasonStr.includes("don't") && !reasonStr.includes('dont'));
+          const isCancel = opt === 3 || reasonStr.includes('cancel') || reasonStr.includes('skip') || (choice.decision === 'deny' && !isDontSave && !isSave);
+
+          if (isCancel) {
+            this.addLogLine('[Open Workspace] User cancelled workspace switch from phone.', 'info');
+            return;
+          }
+
+          if (isDontSave) {
+            this.addLogLine("[Open Workspace] User selected: Don't Save from phone", 'info');
+            for (const doc of dirtyDocs) {
+              try {
+                await vscode.window.showTextDocument(doc.uri, { preview: true, preserveFocus: false });
+                await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+              } catch {
+                try {
+                  await vscode.commands.executeCommand('workbench.action.files.revert', doc.uri);
+                } catch {}
+              }
+            }
+            vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPath), false);
+          } else if (isSave) {
+            this.addLogLine('[Open Workspace] User selected: Save from phone', 'info');
+            let customName = '';
+            if (choice.reason && choice.reason.toLowerCase().startsWith('save:')) {
+              customName = choice.reason.slice(5).trim();
+            }
+
+            for (const doc of dirtyDocs) {
+              try {
+                if (doc.isUntitled) {
+                  const wsFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || targetPath;
+                  let baseName = customName || path.basename(doc.fileName) || 'Untitled-1';
+                  if (!baseName.includes('.')) baseName = `${baseName}.txt`;
+
+                  let targetPathOnDisk = path.join(wsFolder, baseName);
+                  if (fs.existsSync(targetPathOnDisk)) {
+                    const ext = path.extname(baseName);
+                    const nameOnly = path.basename(baseName, ext);
+                    targetPathOnDisk = path.join(wsFolder, `${nameOnly}_${Date.now()}${ext}`);
+                  }
+
+                  const targetUri = vscode.Uri.file(targetPathOnDisk);
+                  await vscode.workspace.fs.writeFile(targetUri, Buffer.from(doc.getText(), 'utf8'));
+                  await vscode.window.showTextDocument(doc.uri, { preview: true, preserveFocus: false });
+                  await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+                } else {
+                  await doc.save();
+                }
+              } catch (docErr: any) {
+                this.addLogLine(`[Open Workspace] Error saving doc ${doc.fileName}: ${docErr.message}`, 'warn');
+              }
+            }
+            await vscode.workspace.saveAll(false);
+            vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPath), false);
+          }
+        });
+      } else {
+        vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(targetPath), false);
+      }
+    } catch (err: any) {
+      this.addLogLine(`[Open Workspace Error] ${err.message}`, 'error');
     }
   }
 

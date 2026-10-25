@@ -206,6 +206,8 @@ export function activate(context: vscode.ExtensionContext) {
   function syncActiveTabs() {
     try {
       const tabs: import('@agy-companion/protocol').EditorTab[] = [];
+      const seen = new Set<string>();
+
       if (vscode.window.tabGroups && vscode.window.tabGroups.all) {
         for (const group of vscode.window.tabGroups.all) {
           for (const tab of group.tabs) {
@@ -216,16 +218,30 @@ export function activate(context: vscode.ExtensionContext) {
               const rel = vscode.workspace.asRelativePath(uri, false);
               if (rel) filePath = rel.replace(/\\/g, '/');
             }
+            const key = (filePath || tab.label).toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+
             tabs.push({
               label: tab.label,
               path: filePath,
-              isActive: tab.isActive && group.isActive,
-              isDirty: tab.isDirty,
+              isActive: Boolean(tab.isActive && group.isActive),
+              isDirty: Boolean(tab.isDirty),
             });
           }
         }
       }
-      daemonManager.updateActiveTabs(tabs);
+
+      // Prioritize active tab, then dirty tabs, then others, capped at 12
+      tabs.sort((a, b) => {
+        if (a.isActive && !b.isActive) return -1;
+        if (!a.isActive && b.isActive) return 1;
+        if (a.isDirty && !b.isDirty) return -1;
+        if (!a.isDirty && b.isDirty) return 1;
+        return 0;
+      });
+
+      daemonManager.updateActiveTabs(tabs.slice(0, 12));
     } catch {}
   }
 
@@ -285,6 +301,10 @@ export function activate(context: vscode.ExtensionContext) {
     } else if (autoStartSetting === 'workspace') {
       shouldStart = hookManager.isInstalledInCurrentWorkspace() || hookManager.isInstalledGlobally();
     } // 'manual' or false -> do not auto start
+
+    if (daemonManager.isUserExplicitlyStopped()) {
+      return;
+    }
 
     if (shouldStart && daemonManager.getStatus() === 'stopped') {
       daemonManager.start();

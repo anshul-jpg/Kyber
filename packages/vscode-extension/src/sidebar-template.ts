@@ -520,8 +520,9 @@ export function renderSidebarHtml(ctx: SidebarRenderContext): string {
   <!-- Brand Header -->
   <div class="header">
     <div class="brand-title">
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+      <svg width="15" height="15" viewBox="0 0 100 100" fill="none">
+        <polygon points="48.5,18 22,58 48.5,98" fill="#ffffff" />
+        <polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa" />
       </svg>
       <span>Antigravity Companion</span>
     </div>

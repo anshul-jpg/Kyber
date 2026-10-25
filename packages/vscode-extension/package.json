@@ -111,7 +111,7 @@
         {
           "id": "antigravity-companion",
           "title": "KYBER",
-          "icon": "media/icon.svg"
+          "icon": "media/activitybar-icon.svg"
         }
       ]
     },
@@ -121,7 +121,7 @@
           "type": "webview",
           "id": "antigravityCompanion.sidebar",
           "name": "KYBER Hub",
-          "icon": "media/icon.svg",
+          "icon": "media/activitybar-icon.svg",
           "visibility": "visible"
         }
       ]

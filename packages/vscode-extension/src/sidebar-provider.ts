@@ -157,7 +157,7 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getInitialLoadingHtml(): string {
-    return `<!DOCTYPE html><html><body style="background:#181818;color:#cccccc;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;padding:16px;font-size:11.5px;"><div style="display:flex;align-items:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#cccccc" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg><strong style="color:#ffffff;">Antigravity Companion</strong></div><p style="margin-top:10px;color:#858585;">Connecting to workspace daemon...</p></body></html>`;
+    return `<!DOCTYPE html><html><body style="background:#181818;color:#cccccc;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;padding:16px;font-size:11.5px;"><div style="display:flex;align-items:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 100 100" fill="none"><polygon points="48.5,18 22,58 48.5,98" fill="#ffffff"/><polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa"/></svg><strong style="color:#ffffff;">Antigravity Companion</strong></div><p style="margin-top:10px;color:#858585;">Connecting to workspace daemon...</p></body></html>`;
   }
 
   public async updateWebview(): Promise<void> {
