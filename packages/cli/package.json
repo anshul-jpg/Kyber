@@ -8,7 +8,9 @@
     "kyber": "dist/bin/agy-companion.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build:tsc": "tsc",
+    "bundle": "esbuild src/bin/agy-companion.ts --bundle --outfile=dist/bin/agy-companion.cjs --platform=node --target=node18 --format=cjs && node -e \"fs.writeFileSync('dist/bin/agy-companion.js', '#!/usr/bin/env node\\nimport \\'./agy-companion.cjs\\';\\n')\"",
+    "build": "tsc && npm run bundle",
     "dev": "tsx src/bin/agy-companion.ts",
     "start": "node dist/bin/agy-companion.js",
     "test": "tsc && node --test dist/**/*.test.js"
@@ -23,6 +25,7 @@
     "@types/node": "^22.13.0",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.5.14",
+    "esbuild": "^0.28.2",
     "tsx": "^4.19.2",
     "typescript": "^5.8.0"
   }

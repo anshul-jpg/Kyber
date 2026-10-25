@@ -13,21 +13,30 @@
 
 ---
 
-## 🛠️ Quickstart
+# ⚡ Installation Channels (Zero Friction)
 
-### 1. Start the Companion Daemon
-From this directory, run:
-```bash
-npm start
+Choose whichever method fits your workflow:
+
+### Channel 1: Windows 1-Liner (Chris Titus Style)
+Open PowerShell and run:
+```powershell
+irm https://raw.githubusercontent.com/anshul/kyber/master/install.ps1 | iex
 ```
-- Your terminal will display an **ASCII QR Code** and the local URL (e.g. `http://<lan-or-tailscale-ip>:4040/`).
-- Scan the QR code with your phone camera (on the same Wi-Fi) or open the URL in your mobile browser.
-- Tap **Add to Home Screen** for an instant fullscreen companion app.
+*(Or locally: `powershell -ExecutionPolicy Bypass -File .\install.ps1`)*  
+Installs the extension into your IDE, configures the global tool interceptor, and prepares everything automatically.
 
-### 2. Enable in Antigravity CLI
-To route Antigravity's tool approvals through your phone companion:
-1. Copy or link `hooks/hooks.json` to your project's `.agents/hooks.json` (or globally in `~/.gemini/config/hooks.json`).
-2. Run `agy` as you normally do. When a sensitive tool executes, your phone will buzz with an actionable prompt!
+### Channel 2: 1-Click Extension (Antigravity & VS Code)
+1. Download the latest self-contained [antigravity-companion-0.1.0.vsix](packages/vscode-extension/antigravity-companion-0.1.0.vsix) from GitHub Releases.
+2. In Antigravity / VS Code: Open Extensions (`Ctrl+Shift+X`) -> `...` -> **Install from VSIX...**
+3. The bundled daemon, web client, and APK runner boot automatically inside the IDE.
+
+### Channel 3: Terminal / Headless (`npx` runner)
+For SSH dev servers, Claude Code, Codex, or headless terminal users:
+```bash
+npx kyber-companion start
+# or install universal hook
+npx kyber-companion hook install -g
+```
 
 ### 3. Test the Setup (Simulator)
 In a separate terminal, run:
