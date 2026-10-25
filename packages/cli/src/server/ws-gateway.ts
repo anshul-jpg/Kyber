@@ -345,6 +345,9 @@ export class WsGateway {
     const isLocal = cleanIp === '127.0.0.1' || cleanIp === '::1' || cleanIp === 'localhost';
     if (isLocal) return true;
 
+    // Tailscale mesh (100.64.0.0/10) is cryptographically authenticated & encrypted by the user's Tailnet
+    if (cleanIp.startsWith('100.')) return true;
+
     const expectedToken = this.getAuthToken();
     if (!expectedToken) return false;
 
@@ -561,6 +564,7 @@ export class WsGateway {
         const rawIp = req?.socket?.remoteAddress || '';
         const clientIp = rawIp.replace(/^::ffff:/, '');
         const isLocal = clientIp === '127.0.0.1' || clientIp === '::1' || clientIp === 'localhost';
+        const isTrustedClient = isLocal || clientIp.startsWith('100.');
         if (clientIp) {
           (ws as any)._clientIp = clientIp;
         }
@@ -604,7 +608,7 @@ export class WsGateway {
           apkBuildTime: apkDetails.apkBuildTime,
           agentQuotas: this.ideWatcher.getAgentQuotas(),
           activeTabs: this.getActiveTabs(),
-          token: isLocal ? (this.getAuthToken() || undefined) : undefined,
+          token: isTrustedClient ? (this.getAuthToken() || undefined) : undefined,
           recentProjects: this.getAllProjects(),
           terminalHistory: this.ideWatcher.getTerminalHistory(),
           telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant'),

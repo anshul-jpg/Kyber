@@ -930,15 +930,15 @@ export const Header: React.FC<HeaderProps> = ({
             >
               Local
             </button>
-            {tailscaleIp && (
+            {(tailscaleIp || host.startsWith('100.')) && (
               <button
                 onClick={() => {
-                  onSelectHost(tailscaleIp, '4040');
+                  onSelectHost(tailscaleIp || host, '4040');
                   triggerHaptic(20);
                 }}
                 style={{
-                  background: host === tailscaleIp ? '#007acc' : '#262626',
-                  border: `1px solid ${host === tailscaleIp ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  background: (host === tailscaleIp || host.startsWith('100.')) ? '#007acc' : '#262626',
+                  border: `1px solid ${(host === tailscaleIp || host.startsWith('100.')) ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
                   borderRadius: '4px',
                   color: '#ffffff',
                   fontSize: '10.5px',

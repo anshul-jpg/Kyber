@@ -868,18 +868,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <span>Localhost</span>
                 </button>
 
-                {tailscaleIp && (
+                {(tailscaleIp || host.startsWith('100.')) && (
                   <button
                     type="button"
                     onClick={() => {
-                      setHost(tailscaleIp);
+                      setHost(tailscaleIp || host);
                       setPort('4040');
                       triggerHaptic(20);
                     }}
                     style={{
-                      background: host === tailscaleIp ? '#007acc' : '#141414',
+                      background: (host === tailscaleIp || host.startsWith('100.')) ? '#007acc' : '#141414',
                       border: `1px solid ${
-                        host === tailscaleIp
+                        (host === tailscaleIp || host.startsWith('100.'))
                           ? 'rgba(0, 122, 204, 0.6)'
                           : 'rgba(255, 255, 255, 0.1)'
                       }`,
@@ -894,7 +894,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       minHeight: '36px',
                     }}
                   >
-                    <Globe size={12} color={host === tailscaleIp ? '#ffffff' : '#858585'} />
+                    <Globe size={12} color={(host === tailscaleIp || host.startsWith('100.')) ? '#ffffff' : '#858585'} />
                     <span>Tailscale</span>
                   </button>
                 )}
