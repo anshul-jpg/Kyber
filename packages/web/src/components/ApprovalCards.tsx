@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { ApprovalRequest } from '@agy-companion/protocol';
 import { triggerHaptic, FileTypeBadge, CopyButton } from './CommonUI';
+import { isIdeSystemDialog } from './IdeSystemDialogModal';
 
 interface ApprovalCardsProps {
   pendingApprovals: ApprovalRequest[];
@@ -418,7 +419,13 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
   const [showAdvancedApproval, setShowAdvancedApproval] = useState<Record<string, boolean>>({});
   const [expandedDiffs, setExpandedDiffs] = useState<Record<string, boolean>>({});
 
-  if (pendingApprovals.length === 0) return null;
+  // Filter out system modal dialogs (rendered as popups, never in-feed text cards)
+  const filteredApprovals = useMemo(
+    () => pendingApprovals.filter(req => !isIdeSystemDialog(req)),
+    [pendingApprovals]
+  );
+
+  if (filteredApprovals.length === 0) return null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%' }}>
@@ -432,7 +439,7 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
           }}
         >
           <span style={{ fontSize: '11.5px', color: '#fbbf24', fontWeight: 600, letterSpacing: '0.02em' }}>
-            {pendingApprovals.length > 1 ? `${pendingApprovals.length} Approvals Pending` : 'Approval Pending'}
+            {filteredApprovals.length > 1 ? `${filteredApprovals.length} Approvals Pending` : 'Approval Pending'}
           </span>
           <button
             onClick={() => {
@@ -457,7 +464,7 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
           </button>
         </div>
       )}
-      {pendingApprovals.map(req => {
+      {filteredApprovals.map(req => {
         if (req.toolCall?.name === 'ask_question') {
           return (
             <QuestionCard

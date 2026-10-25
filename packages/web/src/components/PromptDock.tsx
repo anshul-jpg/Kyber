@@ -19,8 +19,9 @@ import {
   Trash2,
   Check,
 } from 'lucide-react';
-import { QuickAction, CompanionMode, ExecutionPolicy } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
+import { acquireWakeLock, releaseWakeLock } from '../utils/screenLock';
+import { CompanionMode, ExecutionPolicy, QuickAction } from '@agy-companion/protocol';
 
 interface ModifiedFile {
   file: string;
@@ -66,11 +67,6 @@ interface PromptDockProps {
   onEditQueuedPrompt: (index: number, text: string) => void;
   quickActions: QuickAction[];
   onRunQuickAction: (qa: QuickAction) => void;
-  showFilesWithChanges: boolean;
-  setShowFilesWithChanges: (show: boolean) => void;
-  modifiedFilesList: ModifiedFile[];
-  onAcceptAll: () => void;
-  onRejectAll: () => void;
   onSendPrompt: (explicitText?: string) => void;
   onQueuePrompt: (explicitText?: string) => void;
   onEmergencyStop: () => void;
@@ -101,11 +97,6 @@ export const PromptDock = React.memo<PromptDockProps>(({
   onEditQueuedPrompt,
   quickActions,
   onRunQuickAction,
-  showFilesWithChanges,
-  setShowFilesWithChanges,
-  modifiedFilesList,
-  onAcceptAll,
-  onRejectAll,
   onSendPrompt,
   onQueuePrompt,
   onEmergencyStop,
@@ -133,7 +124,28 @@ export const PromptDock = React.memo<PromptDockProps>(({
   }, [promptText]);
 
   useEffect(() => {
+    if (isRecordingAudio) {
+      acquireWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+  }, [isRecordingAudio]);
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' && isRecordingAudio) {
+        acquireWakeLock();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [isRecordingAudio]);
+
+  useEffect(() => {
+    return () => {
+      releaseWakeLock();
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
       if (previewAudioRef.current) {
         previewAudioRef.current.pause();
@@ -219,6 +231,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
   };
 
   const stopAudioRecording = () => {
+    releaseWakeLock();
     triggerHaptic(20);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
@@ -231,6 +244,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
   };
 
   const cancelAudioRecording = () => {
+    releaseWakeLock();
     triggerHaptic(15);
     if (recordingTimerRef.current) {
       clearInterval(recordingTimerRef.current);
@@ -307,139 +321,6 @@ export const PromptDock = React.memo<PromptDockProps>(({
           pointerEvents: 'auto',
         }}
       >
-        {/* Files With Changes Card */}
-        {showFilesWithChanges && (
-          <div
-            style={{
-              background: '#181818',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '8px',
-              padding: '10px 14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.5)',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                paddingBottom: '6px',
-                borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <button
-                  onClick={() => setShowFilesWithChanges(false)}
-                  style={{ background: 'transparent', border: 'none', color: '#858585', cursor: 'pointer', padding: '2px', display: 'flex' }}
-                >
-                  <ArrowLeft size={14} />
-                </button>
-                <FileText size={14} color="#858585" />
-                <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
-                  {modifiedFilesList.length} Files With Changes
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button
-                  onClick={onRejectAll}
-                  style={{
-                    background: 'transparent',
-                    border: 'none',
-                    color: '#858585',
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Reject all
-                </button>
-                <button
-                  onClick={onAcceptAll}
-                  style={{
-                    background: '#282828',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    borderRadius: '14px',
-                    color: '#ffffff',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    padding: '4px 10px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <span>Accept all</span>
-                  <ChevronDown size={11} />
-                </button>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '160px', overflowY: 'auto' }}>
-              {modifiedFilesList.length === 0 ? (
-                <div style={{ padding: '12px 0', textAlign: 'center', color: '#71717a', fontSize: '12px' }}>
-                  No modified files in workspace
-                </div>
-              ) : (
-                modifiedFilesList.map((f, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      fontSize: '12px',
-                      padding: '3px 0',
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: '14px',
-                        height: '14px',
-                        borderRadius: '3px',
-                        border: `1px solid ${f.isNew ? '#4ade80' : '#f59e0b'}`,
-                        color: f.isNew ? '#4ade80' : '#f59e0b',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        flexShrink: 0,
-                      }}
-                    >
-                      {f.isNew ? '+' : '•'}
-                    </span>
-
-                    <span style={{ fontFamily: 'monospace', fontSize: '11px', display: 'flex', gap: '4px', flexShrink: 0 }}>
-                      <span style={{ color: '#4ade80' }}>+{f.ins}</span>
-                      <span style={{ color: '#f87171' }}>-{f.del}</span>
-                    </span>
-
-                    <span style={{ fontWeight: 600, color: '#ffffff', flexShrink: 0 }}>
-                      {f.file}
-                    </span>
-
-                    <span
-                      style={{
-                        color: '#71717a',
-                        fontSize: '11px',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {f.fullPath}
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Input Card Container */}
         <div
           style={{

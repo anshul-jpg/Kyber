@@ -14,6 +14,7 @@ import {
 import { FileTypeBadge, CopyButton, MarkdownContent, triggerHaptic } from './CommonUI';
 import { DiffViewer } from './ApprovalCards';
 import { decodePairingTicket, TerminalEntry } from '@agy-companion/protocol';
+import { getApiBaseUrl } from '../utils/api';
 
 interface ModifiedFile {
   file: string;
@@ -94,11 +95,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
   }, [terminalEntries, terminalLogs, activeActionModal]);
 
   const getHttpBase = useCallback(() => {
-    const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-    const hostNoPort = cleanH.replace(/:\d+$/, '');
-    return cleanH.includes('.trycloudflare.com')
-      ? `https://${hostNoPort}`
-      : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+    return getApiBaseUrl(host, port);
   }, [host, port]);
 
   const getAuthToken = useCallback((): string => {
@@ -170,6 +167,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
 
   useEffect(() => {
     setPreviewItem(null);
+    setWorkspaceFiles({});
     if (activeActionModal === 'explorer') {
       fetchFiles('');
       if (initialOpenFile) {
@@ -586,7 +584,11 @@ export const ActionModals = React.memo<ActionModalsProps>(({
               {activeActionModal === 'terminal' && 'Terminal Execution'}
               {activeActionModal === 'artifacts' && 'Generated Artifacts'}
               {activeActionModal === 'browser' && 'Browser Preview'}
-              {activeActionModal === 'explorer' && 'Workspace Explorer'}
+              {activeActionModal === 'explorer' && (
+                <span>
+                  Workspace Explorer <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#0078d4' }}>({activeWorkspaceName || 'Current'})</span>
+                </span>
+              )}
             </span>
           </div>
           <button

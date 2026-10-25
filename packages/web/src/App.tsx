@@ -27,9 +27,7 @@ import {
 
 import { triggerHaptic } from './components/CommonUI';
 import { Header } from './components/Header';
-import { EditorTabsStrip } from './components/EditorTabsStrip';
-import { SegmentedNav, WorkspaceViewSegment } from './components/SegmentedNav';
-import { WorkspaceTabsView } from './components/WorkspaceTabsView';
+import { WorkspaceView } from './components/WorkspaceView';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatFeed } from './components/ChatFeed';
 import { ApprovalCards } from './components/ApprovalCards';
@@ -38,7 +36,9 @@ import { BottomStatusBar } from './components/BottomStatusBar';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { ActionModals } from './components/ActionModals';
 import { SettingsModal } from './components/SettingsModal';
+import { IdeSystemDialogModal, isIdeSystemDialog } from './components/IdeSystemDialogModal';
 import { useCompanionSocket } from './hooks/useCompanionSocket';
+import { getApiBaseUrl } from './utils/api';
 
 export default function App() {
   // Check URL ticket or token on initial boot
@@ -76,15 +76,12 @@ export default function App() {
       if (urlHost) return urlHost;
       const isMobileApp = navigator.userAgent.includes('Android') || !!(window as any).Capacitor;
       const saved = localStorage.getItem('agy_host');
-      if (saved && (!isMobileApp || (saved !== 'localhost' && saved !== '127.0.0.1'))) {
+      if (saved) {
         return saved;
       }
-      if (isMobileApp || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return '100.107.129.104'; // Default to Tailscale mesh IP for native mobile APK
-      }
-      return window.location.hostname || '100.107.129.104';
+      return (window.location.hostname && window.location.hostname !== 'localhost') ? window.location.hostname : '127.0.0.1';
     }
-    return '100.107.129.104';
+    return '127.0.0.1';
   });
 
   const [port, setPort] = useState<string>(() => {
@@ -100,7 +97,7 @@ export default function App() {
     return (localStorage.getItem('agy_companion_mode') as CompanionMode) || 'remote';
   });
   const [quickActions, setQuickActions] = useState<QuickAction[]>([]);
-  const [, setTailscaleIp] = useState<string | null>(null);
+  const [tailscaleIp, setTailscaleIp] = useState<string | null>(null);
   const [ideStatus, setIdeStatus] = useState<'active' | 'dormant'>('active');
   const [apkUpdateAvailable, setApkUpdateAvailable] = useState<boolean>(false);
   const [apkUpdateProgress, setApkUpdateProgress] = useState<{ inProgress: boolean; percent: number; status: string } | null>(null);
@@ -116,7 +113,13 @@ export default function App() {
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalRequest[]>([]);
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [selectedTabFile, setSelectedTabFile] = useState<{ path: string; name: string } | null>(null);
-  const [activeSegment, setActiveSegment] = useState<WorkspaceViewSegment>('chat');
+  const [activeSegment, setActiveSegment] = useState<'chat' | 'workspace'>('chat');
+
+  // Active IDE System Modal Dialog (1:1 Antigravity Desktop-Fidelity popup)
+  const activeDialog = useMemo(
+    () => pendingApprovals.find(req => isIdeSystemDialog(req)),
+    [pendingApprovals]
+  );
 
   // Prompt & Input Dock States
   const [promptText, setPromptText] = useState<string>('');
@@ -134,7 +137,6 @@ export default function App() {
     return (localStorage.getItem('agy_execution_policy') as ExecutionPolicy) || 'force_ask';
   });
   const [agentQuotas, setAgentQuotas] = useState<AgentQuota[]>([]);
-  const [showFilesWithChanges, setShowFilesWithChanges] = useState<boolean>(false);
   const [activeActionModal, setActiveActionModal] = useState<'diff' | 'terminal' | 'artifacts' | 'browser' | 'explorer' | null>(null);
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
   const [terminalEntries, setTerminalEntries] = useState<TerminalEntry[]>([]);
@@ -166,20 +168,16 @@ export default function App() {
     localStorage.setItem('agy_execution_policy', policy);
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'client:set_execution_policy', policy }));
+    } else {
+      try {
+        const httpBase = getApiBaseUrl(host, port);
+        fetch(`${httpBase}/api/policy`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ policy }),
+        }).catch(() => {});
+      } catch {}
     }
-    try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
-
-      fetch(`${httpBase}/api/policy`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ policy }),
-      }).catch(() => {});
-    } catch {}
   };
 
   // File Explorer expanded directories state
@@ -205,6 +203,7 @@ export default function App() {
 
   // Refs
   const wsRef = useRef<WebSocket | null>(null);
+  const mainRef = useRef<HTMLElement | null>(null);
   const chatBottomRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -337,23 +336,69 @@ export default function App() {
     return () => window.removeEventListener('approval_resolved_external', handleExternalApproval);
   }, [host, port]);
 
+  // Listen for Android hardware / gesture back button
+  useEffect(() => {
+    const handleAndroidBack = () => {
+      if (showSettingsModal) {
+        setShowSettingsModal(false);
+      } else if (activeActionModal) {
+        setActiveActionModal(null);
+      } else if (showHistoryDrawer) {
+        setShowHistoryDrawer(false);
+      } else if (showOptionsDropdown) {
+        setShowOptionsDropdown(false);
+      } else {
+        if ((window as any).AndroidHost?.minimizeApp) {
+          (window as any).AndroidHost.minimizeApp();
+        }
+      }
+    };
+    window.addEventListener('android_back_pressed', handleAndroidBack);
+    return () => window.removeEventListener('android_back_pressed', handleAndroidBack);
+  }, [showSettingsModal, activeActionModal, showHistoryDrawer, showOptionsDropdown]);
+
   const isFirstMountRef = useRef(true);
   const userScrolledUpRef = useRef(false);
 
-  // Track if user manually scrolled up
+  // Track if user manually scrolled up inside the main container
   useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
     const handleScroll = () => {
-      const scrollPos = window.scrollY || document.documentElement.scrollTop;
-      const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-      userScrolledUpRef.current = maxScroll - scrollPos > 120;
+      const maxScroll = el.scrollHeight - el.clientHeight;
+      userScrolledUpRef.current = maxScroll - el.scrollTop > 120;
     };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
+    el.addEventListener('scroll', handleScroll, { passive: true });
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, [activeSegment]);
+
+  // When switching segments, scroll to bottom for chat and top for workspace
+  useEffect(() => {
+    if (activeSegment === 'chat') {
+      userScrolledUpRef.current = false;
+      const scrollDown = () => {
+        if (mainRef.current) {
+          mainRef.current.scrollTop = mainRef.current.scrollHeight;
+        }
+        chatBottomRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      };
+      scrollDown();
+      const t1 = setTimeout(scrollDown, 30);
+      const t2 = setTimeout(scrollDown, 120);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    } else if (activeSegment === 'workspace') {
+      if (mainRef.current) {
+        mainRef.current.scrollTop = 0;
+      }
+    }
+  }, [activeSegment]);
 
   // Auto-scroll chat without jarring animated roll
   useEffect(() => {
-    if (!chatBottomRef.current) return;
+    if (activeSegment !== 'chat' || !chatBottomRef.current) return;
     if (isFirstMountRef.current) {
       chatBottomRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
       isFirstMountRef.current = false;
@@ -362,12 +407,18 @@ export default function App() {
     if (!userScrolledUpRef.current) {
       chatBottomRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
     }
-  }, [chatMessages.length, isStreaming]);
+  }, [chatMessages.length, isStreaming, activeSegment]);
 
-  // When a tool approval arrives, instantly scroll down
+  // When a tool approval arrives, instantly switch to chat and scroll down
   useEffect(() => {
-    if (pendingApprovals.length > 0 && chatBottomRef.current) {
-      chatBottomRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+    if (pendingApprovals.length > 0) {
+      if (activeSegment !== 'chat') {
+        setActiveSegment('chat');
+      }
+      userScrolledUpRef.current = false;
+      if (chatBottomRef.current) {
+        chatBottomRef.current.scrollIntoView({ behavior: 'auto', block: 'end' });
+      }
     }
   }, [pendingApprovals.length]);
 
@@ -380,12 +431,12 @@ export default function App() {
   ) => {
     triggerHaptic(35);
 
-    let reason: string | undefined;
+    let reason: string | undefined = customText || undefined;
     let overrides: string[] | undefined;
 
-    if (decision === 'deny') {
-      reason = customText || 'Denied remotely via companion app';
-    } else {
+    if (decision === 'deny' && !reason) {
+      reason = 'Denied remotely via companion app';
+    } else if (decision === 'allow') {
       if (selectedOption === 2) overrides = ['always_allow_session'];
       if (selectedOption === 3) overrides = ['always_allow_tool'];
     }
@@ -395,6 +446,7 @@ export default function App() {
       decision,
       reason,
       selectedOption,
+      option: selectedOption,
       permissionOverrides: overrides,
     };
 
@@ -410,11 +462,7 @@ export default function App() {
     }
 
     try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const httpBase = getApiBaseUrl(host, port);
       fetch(`${httpBase}/api/hook/approval`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -459,11 +507,7 @@ export default function App() {
       wsRef.current.send(JSON.stringify({ type: 'client:clear_approvals' }));
     }
     try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const httpBase = getApiBaseUrl(host, port);
       fetch(`${httpBase}/api/approvals/clear`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -479,7 +523,6 @@ export default function App() {
     pendingApprovals.forEach(req => {
       sendDecision(req.id, 'allow', 1);
     });
-    setShowFilesWithChanges(false);
   };
 
   const handleRejectAll = () => {
@@ -487,7 +530,6 @@ export default function App() {
     pendingApprovals.forEach(req => {
       sendDecision(req.id, 'deny', 4, 'Rejected all changes');
     });
-    setShowFilesWithChanges(false);
   };
 
   // Toggle Mode
@@ -502,20 +544,16 @@ export default function App() {
           mode: newMode,
         })
       );
+    } else {
+      try {
+        const httpBase = getApiBaseUrl(host, port);
+        fetch(`${httpBase}/api/mode`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ mode: newMode }),
+        }).catch(() => {});
+      } catch {}
     }
-    try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
-
-      fetch(`${httpBase}/api/mode`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ mode: newMode }),
-      }).catch(() => {});
-    } catch {}
   };
 
   // Quick Action
@@ -535,6 +573,7 @@ export default function App() {
   // Emergency Stop
   const handleEmergencyStop = () => {
     triggerHaptic([60, 40, 60]);
+    let wsDispatched = false;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       try {
         wsRef.current.send(
@@ -543,22 +582,20 @@ export default function App() {
             workspaceId: activeWorkspaceId,
           })
         );
+        wsDispatched = true;
       } catch {}
     }
 
-    try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
-
-      fetch(`${httpBase}/api/stop`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ workspaceId: activeWorkspaceId }),
-      }).catch(() => {});
-    } catch {}
+    if (!wsDispatched) {
+      try {
+        const httpBase = getApiBaseUrl(host, port);
+        fetch(`${httpBase}/api/stop`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ workspaceId: activeWorkspaceId }),
+        }).catch(() => {});
+      } catch {}
+    }
 
     pendingApprovals.forEach(req => sendDecision(req.id, 'deny', 1, 'Interrupted by user via Stop button'));
     setPendingApprovals([]);
@@ -612,11 +649,7 @@ export default function App() {
     }
 
     if (!sentViaWs) {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const httpBase = getApiBaseUrl(host, port);
       const token = getAuthToken();
       const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
 
@@ -638,21 +671,59 @@ export default function App() {
 
   const handleLaunchRecentProject = useCallback((projectPath: string) => {
     triggerHaptic(30);
+    const baseName = projectPath.replace(/\\/g, '/').split('/').filter(Boolean).pop() || 'Project';
+    setConversationTitle(`Opening ${baseName}...`);
+    setChatMessages([]);
+    setIsStreaming(false);
+    setCurrentThinking(null);
+    setActiveSegment('chat');
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'client:launch_project', path: projectPath }));
+    } else {
+      try {
+        const httpBase = getApiBaseUrl(host, port);
+        const token = getAuthToken();
+        const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+        fetch(`${httpBase}/api/workspace/launch${tokenParam}`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ path: projectPath }),
+        }).catch(() => {});
+      } catch {}
+    }
+  }, [host, port, getAuthHeaders, getAuthToken]);
+
+  const handleCloseTab = useCallback((tab: EditorTab) => {
+    triggerHaptic(15);
+    setEditorTabs(prev => prev.filter(t => (t.path || t.label) !== (tab.path || tab.label)));
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'client:close_tab', path: tab.path, label: tab.label }));
     }
     try {
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const httpBase = getApiBaseUrl(host, port);
       const token = getAuthToken();
       const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-      fetch(`${httpBase}/api/workspace/launch${tokenParam}`, {
+      fetch(`${httpBase}/api/tabs/close${tokenParam}`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ path: projectPath }),
+        body: JSON.stringify({ path: tab.path, label: tab.label }),
+      }).catch(() => {});
+    } catch {}
+  }, [host, port, getAuthHeaders, getAuthToken]);
+
+  const handleCloseAllTabs = useCallback(() => {
+    triggerHaptic(25);
+    setEditorTabs([]);
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'client:close_all_tabs' }));
+    }
+    try {
+      const httpBase = getApiBaseUrl(host, port);
+      const token = getAuthToken();
+      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
+      fetch(`${httpBase}/api/tabs/close-all${tokenParam}`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
       }).catch(() => {});
     } catch {}
   }, [host, port, getAuthHeaders, getAuthToken]);
@@ -663,11 +734,7 @@ export default function App() {
       wsRef.current.send(JSON.stringify({ type: 'client:close_ide', providerId }));
     } else {
       try {
-        const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-        const hostNoPort = cleanH.replace(/:\d+$/, '');
-        const httpBase = cleanH.includes('.trycloudflare.com')
-          ? `https://${hostNoPort}`
-          : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+        const httpBase = getApiBaseUrl(host, port);
         const token = getAuthToken();
         const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
         fetch(`${httpBase}/api/host/close-ide${tokenParam}`, {
@@ -686,11 +753,7 @@ export default function App() {
       wsRef.current.send(JSON.stringify({ type: 'client:restart_ide', providerId, workspacePath: targetPath }));
     } else {
       try {
-        const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-        const hostNoPort = cleanH.replace(/:\d+$/, '');
-        const httpBase = cleanH.includes('.trycloudflare.com')
-          ? `https://${hostNoPort}`
-          : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+        const httpBase = getApiBaseUrl(host, port);
         const token = getAuthToken();
         const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
         fetch(`${httpBase}/api/host/restart-ide${tokenParam}`, {
@@ -705,11 +768,7 @@ export default function App() {
   // Trigger in-app APK update or browser download
   const handleInstallApk = () => {
     triggerHaptic(30);
-    const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-    const hostNoPort = cleanH.replace(/:\d+$/, '');
-    const httpBase = cleanH.includes('.trycloudflare.com')
-      ? `https://${hostNoPort}`
-      : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+    const httpBase = getApiBaseUrl(host, port);
     const downloadUrl = `${httpBase}/download/app.apk`;
 
     if ((window as any).AndroidHost?.downloadAndInstallApk) {
@@ -912,10 +971,7 @@ export default function App() {
     setActiveActionModal('explorer');
   }, []);
 
-  const handleSelectSegment = useCallback((segment: WorkspaceViewSegment) => {
-    if (segment === 'explorer') {
-      setActiveActionModal('explorer');
-    }
+  const handleSelectSegment = useCallback((segment: 'chat' | 'workspace') => {
     setActiveSegment(segment);
   }, []);
 
@@ -953,7 +1009,7 @@ export default function App() {
         onOpenHistory={() => {
           setShowHistoryDrawer(true);
           if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'client:list_conversations' }));
+            wsRef.current.send(JSON.stringify({ type: 'client:list_conversations', workspaceId: activeWorkspaceId }));
           }
         }}
         showOptionsDropdown={showOptionsDropdown}
@@ -986,29 +1042,16 @@ export default function App() {
         }}
         recentProjects={recentProjects}
         onLaunchRecentProject={handleLaunchRecentProject}
+        activeSegment={activeSegment}
+        onSelectSegment={handleSelectSegment}
+        openTabsCount={editorTabs.length}
+        modifiedCount={modifiedFilesList.length}
         hostTelemetry={hostTelemetry}
+        tailscaleIp={tailscaleIp}
         onCloseIde={handleCloseIde}
         onRestartIde={handleRestartIde}
       />
 
-      {/* Level 3 Segmented 3-Pillar Switcher */}
-      <SegmentedNav
-        activeSegment={activeSegment}
-        onSelectSegment={handleSelectSegment}
-        tabsCount={editorTabs.length}
-      />
-
-      {/* Active Editor Tabs Strip (Glanceable touch strip in Chat view) */}
-      {activeSegment === 'chat' && (
-        <EditorTabsStrip
-          tabs={editorTabs}
-          activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
-          onSelectTab={handleSelectTab}
-          onInspectTab={handleInspectTab}
-          onOpenExplorer={() => handleSelectSegment('explorer')}
-          modifiedFiles={modifiedFilesList}
-        />
-      )}
 
       {/* 401 Unauthorized Re-Pairing Banner */}
       {authError && !connected && (
@@ -1093,6 +1136,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main
+        ref={mainRef}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -1107,16 +1151,38 @@ export default function App() {
           boxSizing: 'border-box',
         }}
       >
-        {activeSegment === 'tabs' ? (
-          <WorkspaceTabsView
+        {activeSegment === 'workspace' ? (
+          <>
+            {pendingApprovals.length > 0 && (
+              <div style={{ marginBottom: '4px' }}>
+                <ApprovalCards
+                  pendingApprovals={pendingApprovals}
+                  onSendDecision={sendDecision}
+                  onClearAll={handleClearApprovals}
+                />
+              </div>
+            )}
+            <WorkspaceView
             tabs={editorTabs}
+            activeWorkspaceId={activeWorkspaceId}
             activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
             onSelectTab={handleSelectTab}
             onInspectTab={handleInspectTab}
-            onOpenExplorer={() => handleSelectSegment('explorer')}
             modifiedFiles={modifiedFilesList}
+            host={host}
+            port={port}
+            getAuthHeaders={getAuthHeaders}
+            recentProjects={recentProjects}
+            onLaunchRecentProject={handleLaunchRecentProject}
+            onCloseTab={handleCloseTab}
+            onCloseAllTabs={handleCloseAllTabs}
+            onPreviewFile={(file) => {
+              setSelectedTabFile(file);
+              setActiveActionModal('explorer');
+            }}
           />
-        ) : chatMessages.length === 0 && pendingApprovals.length === 0 ? (
+        </>
+      ) : chatMessages.length === 0 && pendingApprovals.length === 0 ? (
           <HomeScreen
             workspaces={workspaces}
             activeWorkspaceId={activeWorkspaceId}
@@ -1199,11 +1265,6 @@ export default function App() {
         onEditQueuedPrompt={handleEditQueuedPrompt}
         quickActions={quickActions}
         onRunQuickAction={handleRunQuickAction}
-        showFilesWithChanges={showFilesWithChanges}
-        setShowFilesWithChanges={setShowFilesWithChanges}
-        modifiedFilesList={modifiedFilesList}
-        onAcceptAll={handleAcceptAll}
-        onRejectAll={handleRejectAll}
         onSendPrompt={sendPrompt}
         onQueuePrompt={handleQueuePrompt}
         onEmergencyStop={handleEmergencyStop}
@@ -1233,9 +1294,6 @@ export default function App() {
         onClose={() => {
           setActiveActionModal(null);
           setSelectedTabFile(null);
-          if (activeSegment === 'explorer') {
-            setActiveSegment('chat');
-          }
         }}
         expandedFolders={expandedFolders}
         onToggleFolder={toggleFolder}
@@ -1248,6 +1306,14 @@ export default function App() {
         port={port}
         initialOpenFile={selectedTabFile}
       />
+
+      {/* 1:1 Antigravity Desktop-Fidelity System Modal Dialog (e.g. Save Unsaved Changes) */}
+      {activeDialog && (
+        <IdeSystemDialogModal
+          request={activeDialog}
+          onSendDecision={sendDecision}
+        />
+      )}
 
       {/* Connection & Pairing Settings Screen */}
       <SettingsModal
@@ -1267,6 +1333,7 @@ export default function App() {
         onCloseIde={handleCloseIde}
         onRestartIde={handleRestartIde}
         onEmergencyStop={handleEmergencyStop}
+        tailscaleIp={tailscaleIp}
       />
     </div>
   );

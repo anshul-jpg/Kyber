@@ -22,6 +22,7 @@ import {
   sanitizeNotificationText,
 } from '../utils/notifications';
 import { triggerHaptic } from '../components/CommonUI';
+import { getApiBaseUrl } from '../utils/api';
 
 export interface CompanionSocketOptions {
   host: string;
@@ -132,7 +133,7 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
     let hostWithoutPort = cleanHost.replace(/:\d+$/, '');
     const isMobileApp = navigator.userAgent.includes('Android') || !!(window as any).Capacitor;
     if (isMobileApp && (hostWithoutPort === 'localhost' || hostWithoutPort === '127.0.0.1')) {
-      hostWithoutPort = '100.107.129.104';
+      hostWithoutPort = window.location.hostname && window.location.hostname !== 'localhost' ? window.location.hostname : '127.0.0.1';
     }
 
     if (cleanHost.includes('.trycloudflare.com')) {
@@ -140,7 +141,7 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
     } else if (window.location.protocol === 'https:' && window.location.hostname.includes('.trycloudflare.com')) {
       wsUrl = `wss://${window.location.host}`;
     } else {
-      const targetHost = hostWithoutPort || '100.107.129.104';
+      const targetHost = hostWithoutPort || (typeof window !== 'undefined' ? window.location.hostname : '') || '127.0.0.1';
       const targetPort = (!port || port === '443') ? '4040' : port;
       wsUrl = `ws://${targetHost}:${targetPort}`;
     }
@@ -280,12 +281,27 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
             }
             break;
 
+          case 'server:active_workspace':
+            if (msg.workspaceId) {
+              setActiveWorkspaceId(msg.workspaceId);
+            }
+            break;
+
           case 'server:workspaces_updated': {
-            setWorkspaces(msg.workspaces || []);
-            const updatedApprovals = (msg.workspaces || []).flatMap(w => w.pendingApprovals || []);
+            const list = msg.workspaces || [];
+            setWorkspaces(list);
+            const updatedApprovals = list.flatMap(w => w.pendingApprovals || []);
             setPendingApprovals(updatedApprovals);
             if (updatedApprovals.length === 0) {
               clearApprovalNotification();
+            }
+            if (list.length > 0) {
+              setActiveWorkspaceId(prev => {
+                if (!prev || !list.some(w => w.id === prev)) {
+                  return list[0].id;
+                }
+                return prev;
+              });
             }
             break;
           }
@@ -295,6 +311,9 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
             break;
 
           case 'server:history': {
+            if (msg.workspaceId && msg.workspaceId !== 'default') {
+              setActiveWorkspaceId(msg.workspaceId);
+            }
             const raw = (msg.messages || []) as ChatMessage[];
             const cleaned = raw.filter(m => {
               if (m.role === 'assistant' && m.content && /^\s*\d+:\d+\s*-\s*\d+:\d+:?\s*The user explicitly laid out/i.test(m.content)) {
@@ -523,11 +542,7 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
       }
 
       // Check if connection was rejected due to missing or invalid pairing token
-      const cleanH = (host || '').trim().replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '').replace(/\/$/, '');
-      const hostNoPort = cleanH.replace(/:\d+$/, '');
-      const httpBase = cleanH.includes('.trycloudflare.com')
-        ? `https://${hostNoPort}`
-        : `http://${hostNoPort || '100.107.129.104'}:${(!port || port === '443') ? '4040' : port}`;
+      const httpBase = getApiBaseUrl(host, port);
 
       fetch(`${httpBase}/api/policy`, {
         headers: getAuthHeaders(),

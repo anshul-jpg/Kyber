@@ -17,11 +17,16 @@ import {
   Check,
   Power,
   Cpu,
+  MessageSquare,
 } from 'lucide-react';
 import { CompanionMode, ExecutionPolicy, WorkspaceState, HostTelemetry } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
 
 interface HeaderProps {
+  activeSegment?: 'chat' | 'workspace';
+  onSelectSegment?: (segment: 'chat' | 'workspace') => void;
+  openTabsCount?: number;
+  modifiedCount?: number;
   conversationTitle: string;
   hasMessages: boolean;
   activeActionModal: string | null;
@@ -52,9 +57,14 @@ interface HeaderProps {
   hostTelemetry?: HostTelemetry | null;
   onCloseIde?: (providerId?: string) => void;
   onRestartIde?: (providerId?: string) => void;
+  tailscaleIp?: string | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
+  activeSegment = 'chat',
+  onSelectSegment,
+  openTabsCount = 0,
+  modifiedCount = 0,
   conversationTitle,
   hasMessages,
   activeActionModal,
@@ -85,9 +95,13 @@ export const Header: React.FC<HeaderProps> = ({
   hostTelemetry = null,
   onCloseIde,
   onRestartIde,
+  tailscaleIp,
 }) => {
   const [showWorkspaceDropdown, setShowWorkspaceDropdown] = useState(false);
-  const activeWs = workspaces.find(w => w.id === activeWorkspaceId) || workspaces[0];
+  const cleanWorkspaces = (workspaces || []).filter(
+    w => w.name !== 'bin' && !w.path.toLowerCase().replace(/\\/g, '/').endsWith('/dist/bin') && !w.path.toLowerCase().replace(/\\/g, '/').includes('/packages/cli')
+  );
+  const activeWs = cleanWorkspaces.find(w => w.id === activeWorkspaceId) || cleanWorkspaces[0];
 
   return (
     <>
@@ -109,7 +123,7 @@ export const Header: React.FC<HeaderProps> = ({
         }}
       >
         {/* Left: Active Workspace Pill / Multi-Window Switcher */}
-        <div style={{ position: 'relative', maxWidth: '62%', minWidth: 0, flexShrink: 1 }}>
+        <div style={{ position: 'relative', maxWidth: onSelectSegment ? '38%' : '62%', minWidth: 0, flexShrink: 1 }}>
           <div
             onClick={() => {
               const next = !showWorkspaceDropdown;
@@ -244,11 +258,11 @@ export const Header: React.FC<HeaderProps> = ({
                     textTransform: 'uppercase',
                   }}
                 >
-                  Active Containers ({workspaces.length})
+                  Active Containers ({cleanWorkspaces.length})
                 </div>
 
-                {workspaces && workspaces.length > 0 ? (
-                  workspaces.map(ws => {
+                {cleanWorkspaces && cleanWorkspaces.length > 0 ? (
+                  cleanWorkspaces.map(ws => {
                     const isSelected = ws.id === (activeWorkspaceId || activeWs?.id);
                     return (
                       <div
@@ -438,56 +452,94 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         )}
 
-        {/* Right Header Icons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', marginLeft: 'auto', flexShrink: 0 }}>
-          {/* In-App Update Progress / Update Available Pill */}
-          {apkUpdateProgress?.inProgress ? (
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '3px 7px',
-                borderRadius: '6px',
-                background: 'rgba(0, 122, 204, 0.15)',
-                border: '1px solid rgba(0, 122, 204, 0.35)',
-                fontSize: '10.5px',
-                fontWeight: 600,
-                color: '#38bdf8',
-                marginRight: '3px',
-              }}
-            >
-              <RefreshCw size={10} className="animate-spin" />
-              <span>{apkUpdateProgress.percent}%</span>
-            </div>
-          ) : apkUpdateAvailable ? (
+        {/* Center: Unified 2-Pillar Switcher (Chat | Workspace) */}
+        {onSelectSegment && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              background: '#121214',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '7px',
+              padding: '2px',
+              gap: '2px',
+              flexShrink: 0,
+              userSelect: 'none',
+              marginLeft: 'auto',
+              marginRight: 'auto',
+            }}
+          >
             <button
               onClick={() => {
-                onInstallApk();
-                triggerHaptic(30);
+                triggerHaptic(15);
+                onSelectSegment('chat');
               }}
-              title="A new APK build is ready. Tap to install directly."
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                gap: '4px',
-                padding: '3px 7px',
-                borderRadius: '6px',
-                background: 'rgba(56, 189, 248, 0.12)',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                fontSize: '10.5px',
-                fontWeight: 600,
-                color: '#38bdf8',
-                marginRight: '3px',
+                gap: '5px',
+                padding: '4px 9px',
+                borderRadius: '5px',
+                border: 'none',
+                background: activeSegment === 'chat' ? '#26262a' : 'transparent',
+                color: activeSegment === 'chat' ? '#ffffff' : '#828288',
+                fontSize: '11px',
+                fontWeight: activeSegment === 'chat' ? 600 : 500,
                 cursor: 'pointer',
+                transition: 'all 120ms ease',
+                boxShadow: activeSegment === 'chat' ? '0 1px 3px rgba(0,0,0,0.4)' : 'none',
               }}
             >
-              <Download size={11} />
-              <span>Update</span>
+              <MessageSquare size={12} color={activeSegment === 'chat' ? '#0078d4' : 'currentColor'} />
+              <span>Chat</span>
             </button>
-          ) : null}
 
-          {/* [...] More Options */}
+            <button
+              onClick={() => {
+                triggerHaptic(15);
+                onSelectSegment('workspace');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                padding: '4px 9px',
+                borderRadius: '5px',
+                border: 'none',
+                background: activeSegment === 'workspace' ? '#26262a' : 'transparent',
+                color: activeSegment === 'workspace' ? '#ffffff' : '#828288',
+                fontSize: '11px',
+                fontWeight: activeSegment === 'workspace' ? 600 : 500,
+                cursor: 'pointer',
+                transition: 'all 120ms ease',
+                boxShadow: activeSegment === 'workspace' ? '0 1px 3px rgba(0,0,0,0.4)' : 'none',
+              }}
+            >
+              <Folder size={12} color={activeSegment === 'workspace' ? '#0078d4' : 'currentColor'} />
+              <span>Workspace</span>
+              {openTabsCount > 0 && (
+                <span
+                  style={{
+                    fontSize: '9.5px',
+                    fontFamily: 'monospace',
+                    fontWeight: 700,
+                    background: activeSegment === 'workspace' ? '#0078d4' : 'rgba(255, 255, 255, 0.08)',
+                    color: '#ffffff',
+                    padding: '0 4px',
+                    borderRadius: '8px',
+                    lineHeight: '13px',
+                  }}
+                >
+                  {Math.min(openTabsCount, 12)}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
+
+        {/* Right Header Icons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px', flexShrink: 0 }}>
+          {/* [...] More Options with Blue Notification Dot when Update Available */}
           <div style={{ position: 'relative' }}>
             <button
               onClick={() => {
@@ -511,9 +563,24 @@ export const Header: React.FC<HeaderProps> = ({
                 justifyContent: 'center',
                 cursor: 'pointer',
                 transition: 'background 120ms ease',
+                position: 'relative',
               }}
             >
               <MoreHorizontal size={16} />
+              {(apkUpdateAvailable || apkUpdateProgress?.inProgress) && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: '7px',
+                    right: '7px',
+                    width: '6px',
+                    height: '6px',
+                    borderRadius: '50%',
+                    background: '#0078d4',
+                    boxShadow: '0 0 6px rgba(0, 120, 212, 0.9)',
+                  }}
+                />
+              )}
             </button>
 
             {/* Dropdown Menu */}
@@ -719,36 +786,95 @@ export const Header: React.FC<HeaderProps> = ({
                   <span>Connection Settings</span>
                 </button>
 
-                {/* In-App Update or Download Android APK */}
-                <button
-                  onClick={() => {
-                    onInstallApk();
-                    setShowOptionsDropdown(false);
-                    triggerHaptic(25);
-                  }}
-                  style={{
-                    width: '100%',
-                    boxSizing: 'border-box',
-                    background: 'transparent',
-                    border: 'none',
-                    borderRadius: '6px',
-                    padding: '8px 10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    fontSize: '12.5px',
-                    color: '#cccccc',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                  }}
-                >
-                  <Download size={14} />
-                  <span>
-                    {isNativeApp
-                      ? (apkUpdateProgress?.inProgress ? `Installing (${apkUpdateProgress.percent}%)` : 'In-App Update APK')
-                      : 'Download Android APK'}
-                  </span>
-                </button>
+                {/* In-App Update or Download Android APK with Live Progress Bar */}
+                {apkUpdateProgress?.inProgress ? (
+                  <div
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      background: 'rgba(0, 120, 212, 0.12)',
+                      border: '1px solid rgba(0, 120, 212, 0.3)',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12px' }}>
+                      <span style={{ color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <RefreshCw size={12} className="animate-spin" />
+                        Downloading Update...
+                      </span>
+                      <span style={{ color: '#ffffff', fontFamily: 'monospace', fontWeight: 700 }}>
+                        {apkUpdateProgress.percent}%
+                      </span>
+                    </div>
+                    {/* Progress Track */}
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '4px',
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        borderRadius: '2px',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${Math.min(100, Math.max(5, apkUpdateProgress.percent))}%`,
+                          background: 'linear-gradient(90deg, #0078d4, #38bdf8)',
+                          borderRadius: '2px',
+                          transition: 'width 200ms ease',
+                        }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      onInstallApk();
+                      triggerHaptic(25);
+                    }}
+                    style={{
+                      width: '100%',
+                      boxSizing: 'border-box',
+                      background: apkUpdateAvailable ? 'rgba(0, 120, 212, 0.12)' : 'transparent',
+                      border: apkUpdateAvailable ? '1px solid rgba(0, 120, 212, 0.3)' : 'none',
+                      borderRadius: '6px',
+                      padding: '8px 10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      fontSize: '12.5px',
+                      color: apkUpdateAvailable ? '#38bdf8' : '#cccccc',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <Download size={14} color={apkUpdateAvailable ? '#38bdf8' : 'currentColor'} />
+                      <span style={{ fontWeight: apkUpdateAvailable ? 600 : 400 }}>
+                        {isNativeApp ? 'In-App Update APK' : 'Download Android APK'}
+                      </span>
+                    </div>
+                    {apkUpdateAvailable && (
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          color: '#ffffff',
+                          background: '#0078d4',
+                          padding: '1px 6px',
+                          borderRadius: '4px',
+                        }}
+                      >
+                        NEW
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -788,12 +914,12 @@ export const Header: React.FC<HeaderProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <button
               onClick={() => {
-                onSelectHost('100.107.129.104', '4040');
+                onSelectHost('127.0.0.1', '4040');
                 triggerHaptic(20);
               }}
               style={{
-                background: host === '100.107.129.104' ? '#007acc' : '#262626',
-                border: `1px solid ${host === '100.107.129.104' ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
+                background: host === '127.0.0.1' || host === 'localhost' ? '#007acc' : '#262626',
+                border: `1px solid ${host === '127.0.0.1' || host === 'localhost' ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
                 borderRadius: '4px',
                 color: '#ffffff',
                 fontSize: '10.5px',
@@ -802,44 +928,48 @@ export const Header: React.FC<HeaderProps> = ({
                 cursor: 'pointer',
               }}
             >
-              Tailscale (100.107.129.104)
+              Local
             </button>
-            <button
-              onClick={() => {
-                onSelectHost('subsidiaries-dish-hang-suits.trycloudflare.com', '443');
-                triggerHaptic(20);
-              }}
-              style={{
-                background: host.includes('trycloudflare') ? '#007acc' : '#262626',
-                border: `1px solid ${host.includes('trycloudflare') ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
-                borderRadius: '4px',
-                color: '#ffffff',
-                fontSize: '10.5px',
-                fontWeight: 500,
-                padding: '4px 8px',
-                cursor: 'pointer',
-              }}
-            >
-              Cloudflare
-            </button>
-            <button
-              onClick={() => {
-                onSelectHost('192.168.1.37', '4040');
-                triggerHaptic(20);
-              }}
-              style={{
-                background: host === '192.168.1.37' ? '#007acc' : '#262626',
-                border: `1px solid ${host === '192.168.1.37' ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
-                borderRadius: '4px',
-                color: '#ffffff',
-                fontSize: '10.5px',
-                fontWeight: 500,
-                padding: '4px 8px',
-                cursor: 'pointer',
-              }}
-            >
-              Wi-Fi
-            </button>
+            {tailscaleIp && (
+              <button
+                onClick={() => {
+                  onSelectHost(tailscaleIp, '4040');
+                  triggerHaptic(20);
+                }}
+                style={{
+                  background: host === tailscaleIp ? '#007acc' : '#262626',
+                  border: `1px solid ${host === tailscaleIp ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  fontSize: '10.5px',
+                  fontWeight: 500,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                }}
+              >
+                Tailscale
+              </button>
+            )}
+            {typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && window.location.hostname !== tailscaleIp && (
+              <button
+                onClick={() => {
+                  onSelectHost(window.location.hostname, window.location.port || '4040');
+                  triggerHaptic(20);
+                }}
+                style={{
+                  background: host === window.location.hostname ? '#007acc' : '#262626',
+                  border: `1px solid ${host === window.location.hostname ? 'rgba(0, 122, 204, 0.6)' : 'rgba(255,255,255,0.08)'}`,
+                  borderRadius: '4px',
+                  color: '#ffffff',
+                  fontSize: '10.5px',
+                  fontWeight: 500,
+                  padding: '4px 8px',
+                  cursor: 'pointer',
+                }}
+              >
+                Host
+              </button>
+            )}
           </div>
         </div>
       )}

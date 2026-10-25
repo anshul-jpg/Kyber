@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { decodePairingTicket, ExecutionPolicy, CompanionMode, AgentQuota, HostTelemetry } from '@agy-companion/protocol';
 import { triggerHaptic } from './CommonUI';
+import { getApiBaseUrl } from '../utils/api';
 
 export interface SettingsModalProps {
   isOpen: boolean;
@@ -39,108 +40,9 @@ export interface SettingsModalProps {
   onCloseIde?: (providerId?: string) => void;
   onRestartIde?: (providerId?: string) => void;
   onEmergencyStop?: () => void;
+  tailscaleIp?: string | null;
 }
 
-const DEFAULT_QUOTAS: AgentQuota[] = [
-  {
-    id: 'gemini-3.8-flash-high',
-    name: 'Gemini 3.8 Flash (High)',
-    provider: 'Google',
-    badge: 'Primary Fast',
-    isActive: true,
-    usedPercent: 22,
-    usedUnits: 33,
-    totalUnits: 150,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 38 * 60 * 1000 + 22 * 1000,
-    resetWindowText: '1h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'gemini-3.8-flash-mid',
-    name: 'Gemini 3.8 Flash (Mid)',
-    provider: 'Google',
-    badge: 'Balanced',
-    isActive: false,
-    usedPercent: 12,
-    usedUnits: 18,
-    totalUnits: 150,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 55 * 60 * 1000,
-    resetWindowText: '1h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'gemini-3.8-flash-low',
-    name: 'Gemini 3.8 Flash (Low)',
-    provider: 'Google',
-    badge: 'Efficiency',
-    isActive: false,
-    usedPercent: 5,
-    usedUnits: 5,
-    totalUnits: 200,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 58 * 60 * 1000,
-    resetWindowText: '1h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'claude-opus-4.5',
-    name: 'Claude Opus 4.5',
-    provider: 'Anthropic',
-    badge: 'Deep Architecture',
-    isActive: false,
-    usedPercent: 40,
-    usedUnits: 16,
-    totalUnits: 40,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 3 * 3600 * 1000 + 20 * 60 * 1000,
-    resetWindowText: '5h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'claude-sonnet-4.5',
-    name: 'Claude Sonnet 4.5',
-    provider: 'Anthropic',
-    badge: 'High Craft',
-    isActive: false,
-    usedPercent: 55,
-    usedUnits: 25,
-    totalUnits: 45,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 2 * 3600 * 1000 + 40 * 60 * 1000,
-    resetWindowText: '5h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'gpt-4.5',
-    name: 'GPT-4.5',
-    provider: 'OpenAI',
-    badge: 'Frontier Reasoning',
-    isActive: false,
-    usedPercent: 20,
-    usedUnits: 10,
-    totalUnits: 50,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 1 * 3600 * 1000 + 15 * 60 * 1000,
-    resetWindowText: '3h rolling window',
-    status: 'optimal',
-  },
-  {
-    id: 'gpt-oss',
-    name: 'GPT OSS',
-    provider: 'OpenAI',
-    badge: 'Open Weights',
-    isActive: false,
-    usedPercent: 10,
-    usedUnits: 8,
-    totalUnits: 80,
-    unitLabel: 'reqs',
-    resetTimestamp: Date.now() + 1 * 3600 * 1000 + 5 * 60 * 1000,
-    resetWindowText: '3h rolling window',
-    status: 'optimal',
-  },
-];
 
 function formatCountdown(resetTimestamp: number, currentNow: number): string {
   const diff = Math.max(0, resetTimestamp - currentNow);
@@ -171,6 +73,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onCloseIde,
   onRestartIde,
   onEmergencyStop,
+  tailscaleIp,
 }) => {
   const [ticketInput, setTicketInput] = useState<string>('');
   const [ticketFeedback, setTicketFeedback] = useState<string | null>(null);
@@ -187,7 +90,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   }, []);
 
   const [liveQuotas, setLiveQuotas] = useState<AgentQuota[]>(
-    agentQuotas && agentQuotas.length > 0 ? agentQuotas : DEFAULT_QUOTAS
+    agentQuotas && agentQuotas.length > 0 ? agentQuotas : []
   );
   const [isRefreshingQuotas, setIsRefreshingQuotas] = useState(false);
 
@@ -195,11 +98,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setIsRefreshingQuotas(true);
     triggerHaptic(20);
     try {
-      const proto = window.location.protocol === 'https:' ? 'https:' : 'http:';
-      const targetHost = host || window.location.hostname || '127.0.0.1';
-      const targetPort = port || '4040';
+      const httpBase = getApiBaseUrl(host, port);
       const token = typeof window !== 'undefined' ? localStorage.getItem('agy_token') : null;
-      const res = await fetch(`${proto}//${targetHost}:${targetPort}/api/agent-quotas`, {
+      const res = await fetch(`${httpBase}/api/agent-quotas`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
@@ -462,19 +363,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   REMOTE EXECUTION SUB-MODE
                 </span>
               </div>
-              <span
-                style={{
-                  fontSize: '9.5px',
-                  background: 'rgba(255, 255, 255, 0.06)',
-                  color: '#858585',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  fontWeight: 600,
-                  fontFamily: "'Geist Mono', Consolas, monospace",
-                }}
-              >
-                ~/.agy-companion-policy
-              </span>
             </div>
             <p style={{ fontSize: '11px', color: '#858585', margin: 0, lineHeight: '1.4' }}>
               Governs whether the agent halts for approval cards or executes autonomously when in Remote Mode.
@@ -663,7 +551,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {liveQuotas.map(quota => {
+            {liveQuotas.length === 0 ? (
+              <div
+                style={{
+                  background: '#1e1e1e',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '8px',
+                  padding: '16px',
+                  textAlign: 'center',
+                  color: '#858585',
+                  fontSize: '12px',
+                }}
+              >
+                No active model quotas reported by host daemon.
+              </div>
+            ) : (
+              liveQuotas.map(quota => {
               const remainingTime = formatCountdown(quota.resetTimestamp, now);
               const isExhausted = quota.status === 'exhausted';
               const isModerate = quota.status === 'moderate';
@@ -777,7 +680,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 </div>
               );
-            })}
+            })
+          )}
           </div>
         </section>
 
@@ -938,14 +842,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
-                    setHost('100.107.129.104');
+                    setHost('127.0.0.1');
                     setPort('4040');
                     triggerHaptic(20);
                   }}
                   style={{
-                    background: host === '100.107.129.104' ? '#007acc' : '#141414',
+                    background: host === '127.0.0.1' || host === 'localhost' ? '#007acc' : '#141414',
                     border: `1px solid ${
-                      host === '100.107.129.104'
+                      host === '127.0.0.1' || host === 'localhost'
                         ? 'rgba(0, 122, 204, 0.6)'
                         : 'rgba(255, 255, 255, 0.1)'
                     }`,
@@ -960,67 +864,71 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     minHeight: '36px',
                   }}
                 >
-                  <Globe size={12} color={host === '100.107.129.104' ? '#ffffff' : '#858585'} />
-                  <span>Tailscale (100.107.129.104:4040)</span>
+                  <Globe size={12} color={host === '127.0.0.1' || host === 'localhost' ? '#ffffff' : '#858585'} />
+                  <span>Localhost</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHost('subsidiaries-dish-hang-suits.trycloudflare.com');
-                    setPort('443');
-                    triggerHaptic(20);
-                  }}
-                  style={{
-                    background: host.includes('trycloudflare') ? '#007acc' : '#141414',
-                    border: `1px solid ${
-                      host.includes('trycloudflare')
-                        ? 'rgba(0, 122, 204, 0.6)'
-                        : 'rgba(255, 255, 255, 0.1)'
-                    }`,
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                    color: '#ffffff',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    minHeight: '36px',
-                  }}
-                >
-                  <Globe size={12} color={host.includes('trycloudflare') ? '#ffffff' : '#858585'} />
-                  <span>Cloudflare Tunnel</span>
-                </button>
+                {tailscaleIp && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHost(tailscaleIp);
+                      setPort('4040');
+                      triggerHaptic(20);
+                    }}
+                    style={{
+                      background: host === tailscaleIp ? '#007acc' : '#141414',
+                      border: `1px solid ${
+                        host === tailscaleIp
+                          ? 'rgba(0, 122, 204, 0.6)'
+                          : 'rgba(255, 255, 255, 0.1)'
+                      }`,
+                      borderRadius: '6px',
+                      padding: '6px 10px',
+                      color: '#ffffff',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      minHeight: '36px',
+                    }}
+                  >
+                    <Globe size={12} color={host === tailscaleIp ? '#ffffff' : '#858585'} />
+                    <span>Tailscale</span>
+                  </button>
+                )}
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    setHost('192.168.1.37');
-                    setPort('4040');
-                    triggerHaptic(20);
-                  }}
-                  style={{
-                    background: host === '192.168.1.37' ? '#007acc' : '#141414',
-                    border: `1px solid ${
-                      host === '192.168.1.37'
-                        ? 'rgba(0, 122, 204, 0.6)'
-                        : 'rgba(255, 255, 255, 0.1)'
-                    }`,
-                    borderRadius: '6px',
-                    padding: '6px 10px',
-                    color: '#ffffff',
-                    fontSize: '11px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '5px',
-                    minHeight: '36px',
-                  }}
-                >
-                  <Globe size={12} color={host === '192.168.1.37' ? '#ffffff' : '#858585'} />
-                  <span>Local Wi-Fi (192.168.1.37:4040)</span>
-                </button>
+                {typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1' && window.location.hostname !== tailscaleIp && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHost(window.location.hostname);
+                      setPort(window.location.port || '4040');
+                      triggerHaptic(20);
+                    }}
+                    style={{
+                      background: host === window.location.hostname ? '#007acc' : '#141414',
+                      border: `1px solid ${
+                        host === window.location.hostname
+                          ? 'rgba(0, 122, 204, 0.6)'
+                          : 'rgba(255, 255, 255, 0.1)'
+                      }`,
+                      borderRadius: '6px',
+                      padding: '6px 10px',
+                      color: '#ffffff',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      minHeight: '36px',
+                    }}
+                  >
+                    <Globe size={12} color={host === window.location.hostname ? '#ffffff' : '#858585'} />
+                    <span>Host Network</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -1121,7 +1029,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
         </section>
 
-        {/* Section 6: Hardware & Power Controls (Advanced / Experimental) */}
+        {/* Section 6: Hardware & Power Controls */}
         <section style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -1129,37 +1037,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 style={{
                   fontSize: '11px',
                   fontWeight: 700,
-                  color: '#ef4444',
+                  color: '#e2e8f0',
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
                   margin: 0,
                 }}
               >
-                Hardware & Power Controls (Advanced / Experimental)
+                Proceed with Caution
               </h3>
               <span
                 style={{
                   fontSize: '9.5px',
-                  background: 'rgba(239, 68, 68, 0.15)',
-                  border: '1px solid rgba(239, 68, 68, 0.35)',
-                  color: '#f87171',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: '#a1a1aa',
                   padding: '1px 6px',
                   borderRadius: '4px',
                   fontWeight: 600,
                 }}
               >
-                Proceed with caution
+                Hardware & Power Controls
               </span>
             </div>
-            <p style={{ fontSize: '11.5px', color: '#a0a0a0', margin: 0, lineHeight: '1.4' }}>
+            <p style={{ fontSize: '11.5px', color: '#858585', margin: 0, lineHeight: '1.4' }}>
               Low-level host power states, Wake-on-LAN magic packet routing, and IDE process lifecycle.
             </p>
           </div>
 
           <div
             style={{
-              background: 'rgba(239, 68, 68, 0.03)',
-              border: '1px solid rgba(239, 68, 68, 0.22)',
+              background: '#1e1e1e',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
               borderRadius: '8px',
               padding: '14px',
               display: 'flex',
