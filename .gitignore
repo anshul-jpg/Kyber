@@ -15,3 +15,16 @@ build/
 .agy-companion-recent.json
 *.apk
 .agents/local-notes/
+
+# Local context and roadmaps (kept locally in root, never tracked by git)
+BRAND.md
+CHECKPOINT.md
+CONNECTIVITY_GUIDE.md
+CONTEXT.md
+DESIGN.md
+ERRORS_AND_REVISIONS.md
+HANDOVER_CONTEXT.md
+OPEN_SOURCE_APPROACH.md
+PERSONAL_APPROACH.md
+RESTART_STATE.md
+ROADMAP.md
