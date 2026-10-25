@@ -1,0 +1,74 @@
+name: Build & Release Kyber APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Set up Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build monorepo packages
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: |
+          cd packages/web
+          npx cap copy android
+
+      - name: Make Gradle executable
+        run: chmod +x packages/web/android/gradlew
+
+      - name: Build Android Debug APK
+        run: |
+          cd packages/web/android
+          ./gradlew assembleDebug
+
+      - name: Rename APK artifact
+        run: |
+          cp packages/web/android/app/build/outputs/apk/debug/app-debug.apk kyber-companion.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kyber-companion-apk
+          path: kyber-companion.apk
+          retention-days: 14
+
+      - name: Publish Release (on Git Tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: kyber-companion.apk
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
