@@ -14,3 +14,4 @@ build/
 .agy-companion-roots.json
 .agy-companion-recent.json
 *.apk
+.agents/local-notes/
