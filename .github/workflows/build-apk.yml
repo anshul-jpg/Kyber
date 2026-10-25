@@ -76,7 +76,8 @@ jobs:
           files: |
             kyber-companion.apk
             kyber-0.1.0.vsix
-          name: Release ${{ github.ref_name }}
+          name: Kyber ${{ github.ref_name }} — Autonomous Pocket Supervisor
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
           generate_release_notes: true
