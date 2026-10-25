@@ -2,11 +2,13 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import http from 'http';
+import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 import { ChatMessage, AgentQuota, AudioAttachment, TerminalEntry } from '@agy-companion/protocol';
 
 export class IdeTranscriptWatcher extends EventEmitter {
   private activeTranscriptPath: string | null = null;
+  private currentWorkspaceDir?: string;
   private lastReadBytes: number = 0;
   private remainderBuffer: string = '';
   private lastThought: string | null = null;
@@ -14,12 +16,13 @@ export class IdeTranscriptWatcher extends EventEmitter {
   private watchTimer: NodeJS.Timeout | null = null;
   private messageHistory: ChatMessage[] = [];
   private terminalHistory: TerminalEntry[] = [];
+  private convWorkspaceCache: Map<string, string> = new Map();
 
   constructor() {
     super();
   }
 
-  public setTranscriptPath(transcriptPath: string): void {
+  public setTranscriptPath(transcriptPath: string | null): void {
     if (this.activeTranscriptPath === transcriptPath) return;
 
     this.activeTranscriptPath = transcriptPath;
@@ -28,9 +31,11 @@ export class IdeTranscriptWatcher extends EventEmitter {
     this.lastThought = null;
     this.messageHistory = [];
     this.terminalHistory = [];
-    console.log(`[IdeWatcher] Now tracking IDE transcript: ${transcriptPath}`);
-    this.readNewEntries();
-    this.startWatching();
+    if (transcriptPath) {
+      console.log(`[IdeWatcher] Now tracking IDE transcript: ${transcriptPath}`);
+      this.readNewEntries();
+      this.startWatching();
+    }
   }
 
   public getHistory(): ChatMessage[] {
@@ -63,11 +68,125 @@ export class IdeTranscriptWatcher extends EventEmitter {
     }
   }
 
+  public getWorkspaceStorageMappings(workspaceDir: string): { targetIds: Set<string>; otherIds: Set<string> } {
+    const targetIds = new Set<string>();
+    const otherIds = new Set<string>();
+    try {
+      const home = os.homedir();
+      const storageCandidates = [
+        path.join(home, 'AppData', 'Roaming', 'Antigravity IDE', 'User', 'workspaceStorage'),
+        path.join(home, 'AppData', 'Roaming', 'Code', 'User', 'workspaceStorage'),
+        path.join(home, 'Library', 'Application Support', 'Antigravity IDE', 'User', 'workspaceStorage'),
+        path.join(home, '.config', 'Antigravity IDE', 'User', 'workspaceStorage'),
+      ];
+      const storageDir = storageCandidates.find(p => fs.existsSync(p));
+      if (!storageDir) return { targetIds, otherIds };
+
+      const normTarget = path.resolve(workspaceDir).toLowerCase().replace(/\\/g, '/');
+
+      const subs = fs.readdirSync(storageDir, { withFileTypes: true });
+      for (const sub of subs) {
+        if (!sub.isDirectory()) continue;
+        const wsJsonPath = path.join(storageDir, sub.name, 'workspace.json');
+        if (!fs.existsSync(wsJsonPath)) continue;
+
+        try {
+          const wsJson = JSON.parse(fs.readFileSync(wsJsonPath, 'utf8'));
+          if (!wsJson.folder) continue;
+          let folder = wsJson.folder;
+          if (folder.startsWith('file:///')) {
+            folder = decodeURIComponent(folder.replace('file:///', ''));
+          } else if (folder.startsWith('file://')) {
+            folder = decodeURIComponent(folder.replace('file://', ''));
+          }
+          const normFolder = path.resolve(folder).toLowerCase().replace(/\\/g, '/');
+          const isTarget = normFolder === normTarget;
+
+          const dbPath = path.join(storageDir, sub.name, 'state.vscdb');
+          if (fs.existsSync(dbPath)) {
+            const raw = fs.readFileSync(dbPath).toString('binary');
+            const matches = raw.match(/[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}/g);
+            if (matches) {
+              for (const m of matches) {
+                if (isTarget) {
+                  targetIds.add(m);
+                } else {
+                  otherIds.add(m);
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+    } catch (err: any) {
+      console.warn(`[IdeWatcher] getWorkspaceStorageMappings warning: ${err.message}`);
+    }
+
+    const normTarget = path.resolve(workspaceDir).toLowerCase().replace(/\\/g, '/');
+    for (const [convId, cachedWs] of this.convWorkspaceCache.entries()) {
+      if (cachedWs === normTarget) {
+        targetIds.add(convId);
+      } else {
+        otherIds.add(convId);
+      }
+    }
+
+    return { targetIds, otherIds };
+  }
+
+  public getConversationIdsForWorkspace(workspaceDir: string): Set<string> {
+    return this.getWorkspaceStorageMappings(workspaceDir).targetIds;
+  }
+
+  private isConversationForWorkspace(
+    convId: string,
+    transcriptPath: string,
+    targetDir: string,
+    mappings: { targetIds: Set<string>; otherIds: Set<string> }
+  ): boolean {
+    const normTarget = path.resolve(targetDir).toLowerCase().replace(/\\/g, '/');
+
+    // 1. Explicitly recorded for target workspace
+    if (mappings.targetIds.has(convId)) {
+      return true;
+    }
+
+    // 2. Explicitly recorded for a different workspace
+    if (mappings.otherIds.has(convId)) {
+      return false;
+    }
+
+    // 3. Fast inspection of step 0 header in transcript (covers active and newly created sessions)
+    try {
+      if (fs.existsSync(transcriptPath)) {
+        const fd = fs.openSync(transcriptPath, 'r');
+        const buf = Buffer.alloc(8192);
+        const bytesRead = fs.readSync(fd, buf, 0, 8192, 0);
+        fs.closeSync(fd);
+        if (bytesRead > 0) {
+          const header = buf.subarray(0, bytesRead).toString('utf8').toLowerCase().replace(/\\\\/g, '/');
+          if (header.includes(normTarget)) {
+            this.convWorkspaceCache.set(convId, normTarget);
+            mappings.targetIds.add(convId);
+            return true;
+          }
+        }
+      }
+    } catch {}
+
+    return false;
+  }
+
   public autoDiscoverActiveConversation(workspaceDir?: string): string | null {
     try {
       const home = os.homedir();
       const brainDir = path.join(home, '.gemini', 'antigravity-ide', 'brain');
       if (!fs.existsSync(brainDir)) return null;
+
+      const targetDir = workspaceDir || this.currentWorkspaceDir;
+      if (workspaceDir) {
+        this.currentWorkspaceDir = workspaceDir;
+      }
 
       const entries = fs.readdirSync(brainDir, { withFileTypes: true });
       const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.'));
@@ -91,15 +210,29 @@ export class IdeTranscriptWatcher extends EventEmitter {
         .filter((d): d is { name: string; path: string; mtime: number } => d !== null)
         .sort((a, b) => b.mtime - a.mtime);
 
-      if (candidates.length > 0) {
-        const best = candidates[0];
+      let best: { name: string; path: string; mtime: number } | null = null;
+
+      if (targetDir) {
+        const mappings = this.getWorkspaceStorageMappings(targetDir);
+        for (const candidate of candidates) {
+          if (this.isConversationForWorkspace(candidate.name, candidate.path, targetDir, mappings)) {
+            best = candidate;
+            break;
+          }
+        }
+      } else {
+        best = candidates[0] || null;
+      }
+
+      if (best) {
         let currentMtime = 0;
         if (this.activeTranscriptPath && fs.existsSync(this.activeTranscriptPath)) {
           try {
             currentMtime = fs.statSync(this.activeTranscriptPath).mtimeMs;
           } catch {}
         }
-        if (best.path !== this.activeTranscriptPath && (best.mtime > currentMtime + 2500 || !currentMtime)) {
+        const isExplicitSwitch = !!workspaceDir;
+        if (best.path !== this.activeTranscriptPath && (isExplicitSwitch || best.mtime > currentMtime + 2500 || !currentMtime)) {
           this.setTranscriptPath(best.path);
           this.emit('conversation_switched', {
             id: best.name,
@@ -108,6 +241,17 @@ export class IdeTranscriptWatcher extends EventEmitter {
           });
         }
         return this.activeTranscriptPath || best.path;
+      } else if (targetDir) {
+        // Workspace exists but has no conversations yet
+        if (this.activeTranscriptPath) {
+          this.setTranscriptPath(null);
+          this.emit('conversation_switched', {
+            id: 'new_session',
+            title: 'New Session',
+            history: [],
+          });
+        }
+        return null;
       }
     } catch (err: any) {
       console.warn(`[IdeWatcher] Auto-discover warning: ${err.message}`);
@@ -126,7 +270,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
       this.autoDiscoverTicks++;
       if (this.autoDiscoverTicks >= 30) {
         this.autoDiscoverTicks = 0;
-        this.autoDiscoverActiveConversation();
+        this.autoDiscoverActiveConversation(this.currentWorkspaceDir);
       }
     }, 250);
   }
@@ -330,10 +474,13 @@ export class IdeTranscriptWatcher extends EventEmitter {
     return convId ? `Session ${convId.substring(0, 8)}` : 'Agent';
   }
 
-  public getRecentConversations(): { id: string; title: string; timestamp: number }[] {
+  public getRecentConversations(workspaceDir?: string): { id: string; title: string; timestamp: number }[] {
     const home = os.homedir();
     const brainDir = path.join(home, '.gemini', 'antigravity-ide', 'brain');
     if (!fs.existsSync(brainDir)) return [];
+
+    const targetDir = workspaceDir || this.currentWorkspaceDir;
+    const mappings = targetDir ? this.getWorkspaceStorageMappings(targetDir) : null;
 
     try {
       const dirs = fs.readdirSync(brainDir, { withFileTypes: true });
@@ -342,14 +489,24 @@ export class IdeTranscriptWatcher extends EventEmitter {
         .map(d => {
           const transcriptPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
           if (!fs.existsSync(transcriptPath)) return null;
+
+          if (targetDir && mappings) {
+            if (!this.isConversationForWorkspace(d.name, transcriptPath, targetDir, mappings)) {
+              return null;
+            }
+          }
           const stat = fs.statSync(transcriptPath);
           let title = `Session ${d.name.substring(0, 8)}`;
           try {
             const fd = fs.openSync(transcriptPath, 'r');
-            const buf = Buffer.alloc(4096);
-            const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
-            fs.closeSync(fd);
-            const content = buf.subarray(0, bytesRead).toString('utf8');
+            let content = '';
+            try {
+              const buf = Buffer.alloc(4096);
+              const bytesRead = fs.readSync(fd, buf, 0, 4096, 0);
+              content = buf.subarray(0, bytesRead).toString('utf8');
+            } finally {
+              fs.closeSync(fd);
+            }
             const lines = content.split('\n', 15);
             for (const l of lines) {
               if (!l.trim()) continue;

@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import { ApprovalRequest, ApprovalDecisionPayload, GitFileChange, HOOK_IPC_PORT } from '@agy-companion/protocol';
+import { killStalePort } from '../server/port-cleaner.js';
 
 interface PendingRequest {
   request: ApprovalRequest;
@@ -154,7 +155,6 @@ export class HookIpcServer extends EventEmitter {
       });
 
       try {
-        const { killStalePort } = require('../server/port-cleaner.js');
         killStalePort(this.port);
       } catch {}
 
@@ -346,6 +346,22 @@ export class HookIpcServer extends EventEmitter {
 
   public clearPausedRequest(requestId: string): void {
     this.pausedRequests.delete(requestId);
+  }
+
+  public registerSyntheticRequest(request: ApprovalRequest): void {
+    const timer = setTimeout(() => {
+      this.pendingRequests.delete(request.id);
+      this.emit('approval_resolved', { requestId: request.id, decision: 'deny', reason: 'Dialog timed out' });
+    }, (request.timeoutSeconds || 300) * 1000);
+
+    this.pendingRequests.set(request.id, {
+      request,
+      resolve: () => {
+        clearTimeout(timer);
+        this.pendingRequests.delete(request.id);
+      },
+      timer,
+    });
   }
 
   public clearAllApprovals(reason: string = 'Cleared by user'): void {

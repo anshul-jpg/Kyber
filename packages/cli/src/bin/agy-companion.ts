@@ -174,7 +174,8 @@ function getOrCreateAuthToken(): string {
 }
 
   const { localIp, tailscaleIp } = getNetworkAddresses();
-  const currentDir = process.cwd();
+  const wsIdx = args.indexOf('--workspace');
+  const targetWsDir = wsIdx !== -1 && args[wsIdx + 1] ? path.resolve(args[wsIdx + 1]) : process.cwd();
   
   const portIdx = args.indexOf('--port');
   const daemonPort = portIdx !== -1 && args[portIdx + 1] ? parseInt(args[portIdx + 1], 10) : DEFAULT_DAEMON_PORT;
@@ -194,8 +195,14 @@ function getOrCreateAuthToken(): string {
   const workspaceManager = new WorkspaceManager();
   const wsGateway = new WsGateway(hookIpc, workspaceManager, daemonPort);
 
-  // Register current workspace
-  const activeWs = workspaceManager.registerWorkspace(currentDir);
+  // Register initial workspace if valid user workspace directory
+  const baseName = path.basename(targetWsDir).toLowerCase();
+  const normPath = targetWsDir.toLowerCase().replace(/\\/g, '/');
+  const isInternal = baseName === 'bin' || normPath.endsWith('/dist/bin') || normPath.includes('/packages/cli/dist');
+  let activeWs: import('@agy-companion/protocol').WorkspaceState | undefined = undefined;
+  if (!isInternal && fs.existsSync(targetWsDir) && fs.statSync(targetWsDir).isDirectory()) {
+    activeWs = workspaceManager.registerWorkspace(targetWsDir);
+  }
 
   await hookIpc.start();
   await wsGateway.start();
@@ -210,7 +217,11 @@ function getOrCreateAuthToken(): string {
   `);
   console.log(`[IPC] Hook listener active on:       http://127.0.0.1:${HOOK_IPC_PORT}`);
   console.log(`[WS]  Mobile gateway active on:     ws://${localIp}:${DEFAULT_DAEMON_PORT}`);
-  console.log(`[WS]  Workspace registered:         ${activeWs.name} (${activeWs.path})\n`);
+  if (activeWs) {
+    console.log(`[WS]  Workspace registered:         ${activeWs.name} (${activeWs.path})\n`);
+  } else {
+    console.log('[WS]  Workspace registered:         Awaiting IDE attachment\n');
+  }
 
   // 1. Local Wi-Fi Ticket
   const localTicket = encodePairingTicket({
@@ -219,7 +230,7 @@ function getOrCreateAuthToken(): string {
     port: DEFAULT_DAEMON_PORT,
     ssl: false,
     token: authToken,
-    workspaceId: activeWs.id,
+    workspaceId: activeWs?.id,
   });
   const localMobileUrl = `http://${localIp}:${DEFAULT_DAEMON_PORT}/?ticket=${localTicket}`;
 
@@ -237,7 +248,7 @@ function getOrCreateAuthToken(): string {
       port: DEFAULT_DAEMON_PORT,
       ssl: false,
       token: authToken,
-      workspaceId: activeWs.id,
+      workspaceId: activeWs?.id,
     });
     const tailscaleMobileUrl = `http://${tailscaleIp}:${DEFAULT_DAEMON_PORT}/?ticket=${tailscaleTicket}`;
     console.log('-----------------------------------------------------------');
@@ -259,7 +270,7 @@ function getOrCreateAuthToken(): string {
         port: 443,
         ssl: true,
         token: authToken,
-        workspaceId: activeWs.id,
+        workspaceId: activeWs?.id,
         tunnelUrl: tunnelHandler.url,
       });
       const publicMobileUrl = `${tunnelHandler.url}/?ticket=${tunnelTicket}`;

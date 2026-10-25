@@ -21,6 +21,7 @@ import {
   RecentProject,
   TerminalEntry,
   HostTelemetry,
+  ChatMessage,
 } from '@agy-companion/protocol';
 import { HookIpcServer, getWorkspaceGitChanges } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
@@ -29,6 +30,7 @@ import { getRecentProjects, launchRecentProject } from '../session/recent-projec
 import { closeProvider, restartProvider, getHostTelemetry } from '../provider/provider-lifecycle.js';
 import { killStalePort } from './port-cleaner.js';
 import { handleHttpRequest } from './http-api.js';
+import { CodeRootsManager } from '../session/code-roots.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,6 +54,7 @@ export class WsGateway {
     model?: string;
   }> = [];
   private activeTabs: EditorTab[] = [];
+  private codeRootsManager: CodeRootsManager;
 
   public getActiveTabs(workspaceId?: string): EditorTab[] {
     if (this.activeTabs.length > 0) {
@@ -122,6 +125,20 @@ export class WsGateway {
     if (workspaceId) {
       const match = this.workspaceManager.getWorkspace(workspaceId);
       if (match) return match;
+      try {
+        const decoded = Buffer.from(workspaceId, 'base64url').toString('utf8');
+        if (fs.existsSync(decoded) && fs.statSync(decoded).isDirectory()) {
+          return this.workspaceManager.registerWorkspace(decoded);
+        }
+      } catch {}
+      if (fs.existsSync(workspaceId) && fs.statSync(workspaceId).isDirectory()) {
+        return this.workspaceManager.registerWorkspace(workspaceId);
+      }
+    }
+    const extPaths = Array.from(this.extensionWorkspaces.values());
+    if (extPaths.length > 0) {
+      const activeFromExt = this.workspaceManager.getWorkspaceByPath(extPaths[0]);
+      if (activeFromExt) return activeFromExt;
     }
     const list = this.workspaceManager.listWorkspaces();
     if (list.length > 0) return list[0];
@@ -156,6 +173,7 @@ export class WsGateway {
     private port: number = DEFAULT_DAEMON_PORT
   ) {
     this.ideWatcher = new IdeTranscriptWatcher();
+    this.codeRootsManager = new CodeRootsManager();
     this.setupHookListeners();
     this.setupIdeWatcher();
 
@@ -168,6 +186,52 @@ export class WsGateway {
         });
       }
     }, 6000);
+  }
+
+  public getCodeRootsManager(): CodeRootsManager {
+    return this.codeRootsManager;
+  }
+
+  public getAllProjects(): RecentProject[] {
+    const extPaths = Array.from(this.extensionWorkspaces.values()).map(p => path.resolve(p).toLowerCase());
+    let openWorkspaces: WorkspaceState[];
+    if (extPaths.length > 0) {
+      openWorkspaces = extPaths.map(p => ({
+        id: Buffer.from(p).toString('base64url'),
+        name: path.basename(p),
+        path: p,
+        status: 'idle',
+        lastActive: Date.now(),
+        pendingApprovals: [],
+      }));
+    } else {
+      const activeWs = this.workspaceManager.listWorkspaces()[0];
+      openWorkspaces = activeWs ? [activeWs] : [];
+    }
+
+    const ideRecents = getRecentProjects(openWorkspaces);
+    const scanned = this.codeRootsManager.scanAllProjects(openWorkspaces);
+
+    const seen = new Set<string>();
+    const combined: RecentProject[] = [];
+
+    for (const p of ideRecents) {
+      const lower = path.resolve(p.path).toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        combined.push(p);
+      }
+    }
+
+    for (const p of scanned) {
+      const lower = path.resolve(p.path).toLowerCase();
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        combined.push(p);
+      }
+    }
+
+    return combined;
   }
 
   private getGlobalModeFilePath(): string {
@@ -385,6 +449,8 @@ export class WsGateway {
         type: 'server:approval_resolved',
         requestId: payload.requestId,
         decision: payload.decision,
+        option: payload.option,
+        reason: payload.reason,
       });
     });
 
@@ -419,7 +485,8 @@ export class WsGateway {
     }
 
     let filePath = path.join(WEB_DIST_PATH, reqUrl === '/' ? 'index.html' : reqUrl.split('?')[0]);
-    if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    const rel = path.relative(WEB_DIST_PATH, filePath);
+    if (rel.startsWith('..') || path.isAbsolute(rel) || !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       filePath = path.join(WEB_DIST_PATH, 'index.html');
     }
 
@@ -520,7 +587,7 @@ export class WsGateway {
           agentQuotas: this.ideWatcher.getAgentQuotas(),
           activeTabs: this.getActiveTabs(),
           token: isLocal ? (this.getAuthToken() || undefined) : undefined,
-          recentProjects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+          recentProjects: this.getAllProjects(),
           terminalHistory: this.ideWatcher.getTerminalHistory(),
           telemetry: getHostTelemetry(this.isIdeActive() ? 'active' : 'dormant'),
         };
@@ -587,8 +654,31 @@ export class WsGateway {
           if (msg.workspacePath) {
             const normalized = path.resolve(msg.workspacePath);
             this.extensionWorkspaces.set(ws, normalized);
-            this.workspaceManager.registerWorkspace(normalized);
+            const targetWs = this.workspaceManager.registerWorkspace(normalized);
+            targetWs.lastActive = Date.now();
             console.log(`[WsGateway] VS Code Extension Host attached for workspace: ${normalized}`);
+
+            this.ideWatcher.autoDiscoverActiveConversation(normalized);
+            const history = this.ideWatcher.getHistory();
+
+            this.broadcast({
+              type: 'server:active_workspace',
+              workspaceId: targetWs.id,
+            });
+            this.broadcast({
+              type: 'server:history',
+              workspaceId: targetWs.id,
+              messages: history,
+              conversationTitle: this.ideWatcher.getConversationTitle(),
+            });
+            this.broadcast({
+              type: 'server:workspaces_updated',
+              workspaces: this.workspaceManager.listWorkspaces(),
+            });
+            this.broadcast({
+              type: 'server:recent_projects_updated',
+              projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+            });
           }
           console.log(`[WsGateway] VS Code Extension Host attached as session controller (${this.extensionClients.size} active).`);
           this.broadcast({
@@ -676,6 +766,41 @@ export class WsGateway {
         break;
       }
 
+      case 'client:prompt_dialog': {
+        const dialogReq: ApprovalRequest = {
+          id: msg.dialogId || `dialog_${Date.now()}`,
+          conversationId: 'ide_dialog',
+          workspacePath: msg.workspacePath || process.cwd(),
+          toolTitle: msg.title,
+          isDialog: true,
+          dialogData: {
+            type: msg.dialogType || 'warning',
+            title: msg.title,
+            message: msg.message,
+            detail: msg.detail,
+            options: msg.options || ['Save', "Don't Save", 'Cancel'],
+          },
+          toolCall: {
+            name: 'ask_question',
+            args: {
+              questions: [{
+                question: `${msg.title || ''}\n${msg.message || ''}`.trim(),
+                options: msg.options || ['Save', "Don't Save", 'Cancel'],
+                is_multi_select: false,
+              }],
+            },
+          },
+          timestamp: Date.now(),
+          timeoutSeconds: 300,
+        };
+        this.hookIpc.registerSyntheticRequest(dialogReq);
+        this.broadcast({
+          type: 'server:approval_requested',
+          request: dialogReq,
+        });
+        break;
+      }
+
       case 'client:clear_approvals':
         this.hookIpc.clearAllApprovals('Cleared by user via companion');
         for (const wsState of this.workspaceManager.listWorkspaces()) {
@@ -734,6 +859,38 @@ export class WsGateway {
         break;
       }
 
+      case 'client:close_tab': {
+        const targetPath = msg.path;
+        const targetLabel = msg.label;
+        this.activeTabs = this.activeTabs.filter(t => {
+          if (targetPath && t.path) return t.path !== targetPath;
+          if (targetLabel && t.label) return t.label !== targetLabel;
+          return true;
+        });
+        this.broadcast({
+          type: 'server:close_editor_tab',
+          path: targetPath,
+          label: targetLabel,
+        });
+        this.broadcast({
+          type: 'server:tabs_updated',
+          tabs: this.activeTabs,
+        });
+        break;
+      }
+
+      case 'client:close_all_tabs': {
+        this.activeTabs = [];
+        this.broadcast({
+          type: 'server:close_all_editor_tabs',
+        });
+        this.broadcast({
+          type: 'server:tabs_updated',
+          tabs: this.activeTabs,
+        });
+        break;
+      }
+
       case 'client:run_quick_action':
         this.broadcast({
           type: 'server:run_quick_action',
@@ -753,10 +910,19 @@ export class WsGateway {
 
       case 'client:register_workspace':
         if (msg.path && fs.existsSync(msg.path)) {
-          this.workspaceManager.registerWorkspace(msg.path);
+          const targetWs = this.workspaceManager.registerWorkspace(msg.path);
+          targetWs.lastActive = Date.now();
+          this.broadcast({
+            type: 'server:active_workspace',
+            workspaceId: targetWs.id,
+          });
           this.broadcast({
             type: 'server:workspaces_updated',
             workspaces: this.workspaceManager.listWorkspaces(),
+          });
+          this.broadcast({
+            type: 'server:recent_projects_updated',
+            projects: this.getAllProjects(),
           });
         }
         break;
@@ -765,22 +931,38 @@ export class WsGateway {
         const targetWs = this.workspaceManager.getWorkspace((msg as any).workspaceId);
         if (targetWs) {
           targetWs.lastActive = Date.now();
+          let history: ChatMessage[] = [];
+          let convTitle = targetWs.name;
           if (targetWs.path) {
-            this.ideWatcher.autoDiscoverActiveConversation(targetWs.path);
+            const activeConvId = this.ideWatcher.autoDiscoverActiveConversation(targetWs.path);
+            if (activeConvId) {
+              history = this.ideWatcher.getHistory();
+              convTitle = this.ideWatcher.getConversationTitle();
+            }
           }
-          const history = this.ideWatcher.getHistory();
-          ws.send(
-            JSON.stringify({
-              type: 'server:history',
-              workspaceId: targetWs.id,
-              messages: history,
-              conversationTitle: this.ideWatcher.getConversationTitle(),
-            })
-          );
+          this.broadcast({
+            type: 'server:active_workspace',
+            workspaceId: targetWs.id,
+          });
+          this.broadcast({
+            type: 'server:history',
+            workspaceId: targetWs.id,
+            messages: history,
+            conversationTitle: convTitle,
+          });
           this.broadcast({
             type: 'server:workspaces_updated',
             workspaces: this.workspaceManager.listWorkspaces(),
           });
+
+          // Forward to extension so desktop IDE window switches too
+          if (targetWs.path && this.isIdeActive()) {
+            for (const extWs of this.extensionClients) {
+              if (extWs.readyState === WebSocket.OPEN) {
+                extWs.send(JSON.stringify({ type: 'server:open_workspace', path: targetWs.path }));
+              }
+            }
+          }
         }
         break;
       }
@@ -854,10 +1036,12 @@ export class WsGateway {
       }
 
       case 'client:list_conversations': {
+        const wsId = (msg as any).workspaceId;
+        const targetWs = wsId ? this.workspaceManager.getWorkspace(wsId) : null;
         ws.send(
           JSON.stringify({
             type: 'server:conversations_list',
-            conversations: this.ideWatcher.getRecentConversations(),
+            conversations: this.ideWatcher.getRecentConversations(targetWs?.path),
           })
         );
         break;
@@ -878,6 +1062,30 @@ export class WsGateway {
 
       case 'client:launch_project':
         if (msg.path) {
+          const targetPath = path.resolve(msg.path);
+          const targetWs = this.workspaceManager.registerWorkspace(targetPath);
+          targetWs.lastActive = Date.now();
+
+          // Immediately switch tracking and broadcast to clients
+          const activeConvId = this.ideWatcher.autoDiscoverActiveConversation(targetPath);
+          const history = activeConvId ? this.ideWatcher.getHistory() : [];
+          const convTitle = activeConvId ? this.ideWatcher.getConversationTitle() : `Opening ${targetWs.name}...`;
+
+          this.broadcast({
+            type: 'server:active_workspace',
+            workspaceId: targetWs.id,
+          });
+          this.broadcast({
+            type: 'server:history',
+            workspaceId: targetWs.id,
+            messages: history,
+            conversationTitle: convTitle,
+          });
+          this.broadcast({
+            type: 'server:workspaces_updated',
+            workspaces: this.workspaceManager.listWorkspaces(),
+          });
+
           const isAlive = this.isIdeActive();
           const forwardCb = isAlive ? (p: string) => {
             let sent = false;
@@ -890,10 +1098,10 @@ export class WsGateway {
             return sent;
           } : undefined;
 
-          launchRecentProject(msg.path, forwardCb).then(res => {
+          launchRecentProject(targetPath, forwardCb).then(res => {
             this.broadcast({
               type: 'server:recent_projects_updated',
-              projects: getRecentProjects(this.workspaceManager.listWorkspaces()),
+              projects: this.getAllProjects(),
             });
           });
         }

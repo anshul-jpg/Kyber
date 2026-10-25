@@ -16,6 +16,17 @@ export class WorkspaceManager extends EventEmitter {
     return { id, resolvedPath };
   }
 
+  private isInternalPath(resolvedPath: string): boolean {
+    const base = path.basename(resolvedPath).toLowerCase();
+    const norm = resolvedPath.toLowerCase().replace(/\\/g, '/');
+    return (
+      base === 'bin' ||
+      norm.endsWith('/dist/bin') ||
+      norm.includes('/packages/cli/dist') ||
+      norm.includes('/node_modules/')
+    );
+  }
+
   public registerWorkspace(workspacePath: string, name?: string): WorkspaceState {
     const { id, resolvedPath } = this.getNormalizedId(workspacePath);
     const existing = this.workspaces.get(id);
@@ -23,6 +34,18 @@ export class WorkspaceManager extends EventEmitter {
     if (existing) {
       existing.lastActive = Date.now();
       return existing;
+    }
+
+    if (this.isInternalPath(resolvedPath)) {
+      // Internal CLI path - do not register as a user workspace
+      return {
+        id,
+        name: name || path.basename(resolvedPath) || 'root',
+        path: resolvedPath,
+        status: 'idle',
+        lastActive: Date.now(),
+        pendingApprovals: [],
+      };
     }
 
     const state: WorkspaceState = {
@@ -39,8 +62,25 @@ export class WorkspaceManager extends EventEmitter {
     return state;
   }
 
+  public removeWorkspace(idOrPath: string): void {
+    const { id } = this.getNormalizedId(idOrPath);
+    if (this.workspaces.delete(id)) {
+      this.emit('workspaces_changed', this.listWorkspaces());
+    }
+  }
+
   public getWorkspace(id: string): WorkspaceState | undefined {
-    return this.workspaces.get(id);
+    let ws = this.workspaces.get(id);
+    if (!ws && id) {
+      try {
+        const decoded = Buffer.from(id, 'base64url').toString('utf8');
+        ws = this.getWorkspaceByPath(decoded);
+      } catch {}
+    }
+    if (!ws && id) {
+      ws = this.getWorkspaceByPath(id);
+    }
+    return ws;
   }
 
   public getWorkspaceByPath(workspacePath: string): WorkspaceState | undefined {
@@ -91,7 +131,7 @@ export class WorkspaceManager extends EventEmitter {
   }
 
   public listWorkspaces(): WorkspaceState[] {
-    const list = Array.from(this.workspaces.values());
+    const list = Array.from(this.workspaces.values()).filter(w => !this.isInternalPath(w.path));
     return list.sort((a, b) => (b.lastActive || 0) - (a.lastActive || 0));
   }
 }

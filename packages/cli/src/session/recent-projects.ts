@@ -123,6 +123,8 @@ export function resolveIdeExecutable(): string | null {
   return null;
 }
 
+let inFlightLaunch: { target: string; time: number } | null = null;
+
 export async function launchRecentProject(
   targetPath?: string,
   onForwardToExtension?: (projectPath: string) => boolean,
@@ -135,6 +137,14 @@ export async function launchRecentProject(
       norm = resolved;
     }
   }
+
+  // Prevent duplicate concurrent launches within 2.5s window
+  const launchKey = norm || 'default';
+  const now = Date.now();
+  if (inFlightLaunch && inFlightLaunch.target === launchKey && now - inFlightLaunch.time < 2500) {
+    return { ok: true, message: `Switching to ${path.basename(norm || 'project')}...` };
+  }
+  inFlightLaunch = { target: launchKey, time: now };
 
   // 1. Auto-provision Antigravity Companion hook if workspace folder is known
   if (norm) {
@@ -216,12 +226,13 @@ export async function launchRecentProject(
     try {
       if (fs.existsSync(exe) || !exe.includes(path.sep)) {
         const isCmd = exe.endsWith('.cmd') || exe.endsWith('.bat');
-        const spawnCwd = norm || (exe.includes(path.sep) ? path.dirname(exe) : process.cwd());
+        const spawnCwd = norm || os.homedir();
         let child: import('child_process').ChildProcess;
 
         if (isCmd && process.platform === 'win32') {
-          // Quote properly to prevent spaces from breaking cmd.exe
-          child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', `"${exe}"`, ...args], {
+          // Quote both script and workspace path with spaces to prevent cmd.exe splitting
+          const cmdArgs = norm ? [`"${exe}"`, `"${norm}"`] : [`"${exe}"`];
+          child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', ...cmdArgs], {
             detached: true,
             stdio: 'ignore',
             shell: false,

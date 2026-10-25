@@ -1,7 +1,7 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { WebSocket } from 'ws';
 import { getRecentProjects, launchRecentProject } from '../session/recent-projects.js';
@@ -14,7 +14,7 @@ const __dirname = path.dirname(__filename);
 
 export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage, res: http.ServerResponse): void {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
@@ -23,8 +23,9 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     return;
   }
 
-  const url = req.url || '/';
-  const parsedUrl = new URL(url, 'http://localhost');
+  const rawUrl = req.url || '/';
+  const parsedUrl = new URL(rawUrl, 'http://localhost');
+  const url = parsedUrl.pathname;
 
   // Allow public/benign endpoints without pairing token
   const isPublicEndpoint =
@@ -181,9 +182,11 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
         const rel = path.relative(wsRoot, targetPath);
         return !rel.startsWith('..') && !path.isAbsolute(rel);
       });
-      const isInsideRoot = !path.relative(rootPath, targetPath).startsWith('..');
+      const relToRoot = path.relative(rootPath, targetPath);
+      const isInsideRoot = !relToRoot.startsWith('..') && !path.isAbsolute(relToRoot);
+      const isInsideCodeRoots = gateway.getCodeRootsManager().isPathAllowed(targetPath);
 
-      if ((!isInsideAnyWs && !isInsideRoot) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
+      if ((!isInsideAnyWs && !isInsideRoot && !isInsideCodeRoots) || !fs.existsSync(targetPath) || fs.statSync(targetPath).isDirectory()) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'File not found or invalid' }));
         return;
@@ -327,9 +330,9 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
       try {
         if (safeRel) {
           try {
-            diff = execSync(`git diff HEAD -U3 -- "${safeRel}"`, { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+            diff = execFileSync('git', ['diff', 'HEAD', '-U3', '--', safeRel], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
           } catch {
-            diff = execSync(`git diff -U3 -- "${safeRel}"`, { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+            diff = execFileSync('git', ['diff', '-U3', '--', safeRel], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
           }
           if (!diff.trim()) {
             const full = path.resolve(cwd, safeRel);
@@ -424,6 +427,40 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     }
   }
 
+  // Close Tab in IDE
+  if (url === '/api/tabs/close' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        const targetPath = data.path;
+        const targetLabel = data.label;
+        gateway.broadcast({
+          type: 'server:close_editor_tab',
+          path: targetPath,
+          label: targetLabel,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: e.message }));
+      }
+    });
+    return;
+  }
+
+  // Close All Tabs in IDE
+  if (url === '/api/tabs/close-all' && req.method === 'POST') {
+    gateway.broadcast({
+      type: 'server:close_all_editor_tabs',
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+
   // Live Terminal Logs History
   if (url === '/api/terminal/history' || url.startsWith('/api/terminal/history')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -431,11 +468,10 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     return;
   }
 
-  // Recent Projects Hub API
-  if (url === '/api/workspace/recent' || url.startsWith('/api/workspace/recent')) {
-    const projects = getRecentProjects(gateway.getWorkspaceManager().listWorkspaces());
+  // Recent & Discovered Projects Hub API across all roots
+  if (url === '/api/workspace/recent' || url === '/api/workspace/projects' || url === '/api/recent-projects' || url.startsWith('/api/workspace/recent')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, projects }));
+    res.end(JSON.stringify({ ok: true, projects: gateway.getAllProjects() }));
     return;
   }
 
@@ -447,6 +483,29 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
       try {
         const data = JSON.parse(body);
         if (data.path) {
+          const targetPath = path.resolve(data.path);
+          const targetWs = gateway.getWorkspaceManager().registerWorkspace(targetPath);
+          targetWs.lastActive = Date.now();
+
+          const activeConvId = gateway.getIdeWatcher().autoDiscoverActiveConversation(targetPath);
+          const history = activeConvId ? gateway.getIdeWatcher().getHistory() : [];
+          const convTitle = activeConvId ? gateway.getIdeWatcher().getConversationTitle() : `Opening ${targetWs.name}...`;
+
+          gateway.broadcast({
+            type: 'server:active_workspace',
+            workspaceId: targetWs.id,
+          });
+          gateway.broadcast({
+            type: 'server:history',
+            workspaceId: targetWs.id,
+            messages: history,
+            conversationTitle: convTitle,
+          });
+          gateway.broadcast({
+            type: 'server:workspaces_updated',
+            workspaces: gateway.getWorkspaceManager().listWorkspaces(),
+          });
+
           const isAlive = gateway.isIdeActive();
           const forwardCb = isAlive ? (p: string) => {
             let sent = false;
@@ -458,10 +517,10 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
             }
             return sent;
           } : undefined;
-          const result = await launchRecentProject(data.path, forwardCb);
+          const result = await launchRecentProject(targetPath, forwardCb);
           gateway.broadcast({
             type: 'server:recent_projects_updated',
-            projects: getRecentProjects(gateway.getWorkspaceManager().listWorkspaces()),
+            projects: gateway.getAllProjects(),
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
@@ -469,6 +528,98 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Missing project path' }));
         }
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  // Configured Code Roots (Multi-directory like emulator game folders)
+  if (url === '/api/workspace/roots') {
+    if (req.method === 'GET') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, roots: gateway.getCodeRootsManager().getRoots() }));
+      return;
+    }
+    if (req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body || '{}');
+          const targetPath = data.path || data.root || data.dir;
+          if (!targetPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing directory path' }));
+            return;
+          }
+          const result = gateway.getCodeRootsManager().addRoot(targetPath);
+          gateway.broadcast({
+            type: 'server:recent_projects_updated',
+            projects: gateway.getAllProjects(),
+          });
+          res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+    if (req.method === 'DELETE') {
+      let body = '';
+      req.on('data', chunk => { body += chunk; });
+      req.on('end', () => {
+        try {
+          const parsedBody = body ? JSON.parse(body) : {};
+          const target = parsedUrl.searchParams.get('path') || parsedUrl.searchParams.get('root') || parsedBody.path || parsedBody.root;
+          if (!target) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Missing directory path' }));
+            return;
+          }
+          const result = gateway.getCodeRootsManager().removeRoot(target);
+          gateway.broadcast({
+            type: 'server:recent_projects_updated',
+            projects: gateway.getAllProjects(),
+          });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        }
+      });
+      return;
+    }
+  }
+
+  // Create New Project in Scoped Code Root
+  if (url === '/api/workspace/create' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const rootPath = data.rootPath || data.root || gateway.getCodeRootsManager().getRoots()[0];
+        const projectName = data.name || data.projectName;
+        if (!rootPath || !projectName) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing rootPath or project name' }));
+          return;
+        }
+        const result = gateway.getCodeRootsManager().createProject(rootPath, projectName);
+        if (result.ok) {
+          gateway.broadcast({
+            type: 'server:recent_projects_updated',
+            projects: gateway.getAllProjects(),
+          });
+        }
+        res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));

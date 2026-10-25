@@ -18,6 +18,14 @@ export interface GitFileChange {
   status: string; // 'M' | 'A' | 'D' | '??'
 }
 
+export interface DialogData {
+  type?: 'warning' | 'info' | 'error';
+  title?: string;
+  message?: string;
+  detail?: string;
+  options?: string[];
+}
+
 export interface ApprovalRequest {
   id: string;
   conversationId: string;
@@ -30,6 +38,8 @@ export interface ApprovalRequest {
   gitChanges?: GitFileChange[];
   gitDiff?: string;
   isPaused?: boolean;
+  isDialog?: boolean;
+  dialogData?: DialogData;
 }
 
 export interface EditorTab {
@@ -45,6 +55,7 @@ export interface ApprovalDecisionPayload {
   reason?: string;
   interceptPrompt?: string;
   selectedOption?: number; // 1 | 2 | 3 | 4
+  option?: number;
   permissionOverrides?: string[];
 }
 
@@ -150,13 +161,25 @@ export type WsClientMessage =
   | { type: 'client:run_quick_action'; command: string; label?: string }
   | { type: 'client:list_workspaces' }
   | { type: 'client:emergency_stop'; workspaceId?: string }
-  | { type: 'client:list_conversations' }
+  | { type: 'client:list_conversations'; workspaceId?: string }
   | { type: 'client:switch_conversation'; conversationId: string }
   | { type: 'client:get_agent_quotas' }
   | { type: 'client:clear_approvals' }
   | { type: 'client:list_workspace_files'; workspaceId?: string; subPath?: string }
   | { type: 'client:update_tabs'; tabs: EditorTab[]; workspaceId?: string }
   | { type: 'client:open_editor_tab'; path: string }
+  | { type: 'client:close_tab'; path?: string; label?: string }
+  | { type: 'client:close_all_tabs' }
+  | {
+      type: 'client:prompt_dialog';
+      dialogId: string;
+      title: string;
+      message: string;
+      options: string[];
+      workspacePath?: string;
+      dialogType?: 'warning' | 'info' | 'error';
+      detail?: string;
+    }
   | { type: 'client:ping' };
 
 export interface ConversationSummary {
@@ -187,7 +210,7 @@ export type WsServerMessage =
   | { type: 'server:workspace_files'; workspaceId: string; subPath: string; files: WorkspaceFileEntry[] }
   | { type: 'server:approval_requested'; request: ApprovalRequest }
   | { type: 'server:approval_paused'; request: ApprovalRequest }
-  | { type: 'server:approval_resolved'; requestId: string; decision: string }
+  | { type: 'server:approval_resolved'; requestId: string; decision: string; option?: number; reason?: string }
   | { type: 'server:stream_token'; workspaceId: string; token: string }
   | { type: 'server:stream_thought'; workspaceId: string; thought: string }
   | { type: 'server:chat_message'; workspaceId: string; message: ChatMessage; isIdeBusy?: boolean }
@@ -206,10 +229,13 @@ export type WsServerMessage =
   | { type: 'server:agent_quotas'; quotas: AgentQuota[] }
   | { type: 'server:tabs_updated'; tabs: EditorTab[]; workspaceId?: string }
   | { type: 'server:open_editor_tab'; path: string }
+  | { type: 'server:close_editor_tab'; path?: string; label?: string }
+  | { type: 'server:close_all_editor_tabs' }
   | { type: 'server:terminal_output'; entry: TerminalEntry }
   | { type: 'server:recent_projects_updated'; projects: RecentProject[] }
   | { type: 'server:open_workspace'; path: string }
   | { type: 'server:host_telemetry'; telemetry: HostTelemetry }
+  | { type: 'server:active_workspace'; workspaceId: string }
   | { type: 'server:pong'; timestamp?: number };
 
 export const DEFAULT_DAEMON_PORT = 4040;
