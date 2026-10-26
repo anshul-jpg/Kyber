@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder, GitBranch, Layers, MessageSquare, ArrowRight } from 'lucide-react';
+import { Folder, GitBranch, Layers, MessageSquare, ArrowRight, Play } from 'lucide-react';
 import { WorkspaceState, RecentProject } from '@agy-companion/protocol';
 import { KyberLogo, triggerHaptic } from './CommonUI';
 
@@ -16,6 +16,8 @@ interface HomeScreenProps {
     messageCount?: number;
   } | null;
   onResumeActiveChat?: () => void;
+  ideStatus?: 'active' | 'dormant';
+  onLaunchIde?: () => void;
 }
 
 export const HomeScreen = React.memo<HomeScreenProps>(({
@@ -27,6 +29,8 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
   onLaunchRecentProject,
   activeConversation,
   onResumeActiveChat,
+  ideStatus = 'active',
+  onLaunchIde,
 }) => {
   return (
     <div
@@ -49,15 +53,65 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
 
       <h1
         style={{
-          fontSize: '18px',
-          fontWeight: 700,
+          fontSize: '20px',
+          fontWeight: 600,
           color: '#ffffff',
-          letterSpacing: '0.04em',
+          letterSpacing: '-0.02em',
           marginBottom: '20px',
+          fontFamily: "'Geist Mono', Consolas, monospace",
         }}
       >
-        KYBER
+        kyber.
       </h1>
+
+      {/* Prominent Launch Antigravity IDE Card if PC is Online but IDE is Dormant */}
+      {ideStatus === 'dormant' && onLaunchIde && (
+        <div
+          style={{
+            width: '100%',
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(34, 197, 94, 0.08) 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            borderRadius: '8px',
+            padding: '12px 14px',
+            marginBottom: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#fbbf24', boxShadow: '0 0 6px rgba(251, 191, 36, 0.6)' }} />
+            <div>
+              <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>PC Online • Antigravity IDE Dormant</div>
+              <div style={{ fontSize: '10.5px', color: '#a1a1aa' }}>Desktop IDE is closed. Tap to launch it on PC.</div>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              triggerHaptic(35);
+              onLaunchIde();
+            }}
+            style={{
+              background: '#22c55e',
+              color: '#000000',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '7px 12px',
+              fontSize: '11.5px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              flexShrink: 0,
+            }}
+          >
+            <Play size={12} fill="#000000" />
+            <span>Launch IDE</span>
+          </button>
+        </div>
+      )}
 
       {/* Prominent Resume Active Session Card (Prevents Navigation Trap) */}
       {activeConversation && onResumeActiveChat && (
@@ -68,8 +122,9 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
           }}
           style={{
             width: '100%',
-            background: 'linear-gradient(180deg, rgba(0, 122, 204, 0.16) 0%, rgba(0, 122, 204, 0.06) 100%)',
-            border: '1px solid rgba(0, 122, 204, 0.4)',
+            background: '#0d0d0e',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderLeft: '3px solid #ffffff',
             borderRadius: '8px',
             padding: '12px 14px',
             marginBottom: '16px',
@@ -83,17 +138,17 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: '#10b981', display: 'inline-block' }} />
-              <span style={{ fontSize: '11px', fontWeight: 600, color: '#38bdf8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ffffff', display: 'inline-block' }} />
+              <span style={{ fontSize: '11px', fontWeight: 600, color: '#ffffff', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
                 Active Session
               </span>
             </div>
-            <span style={{ fontSize: '11px', color: '#38bdf8', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+            <span style={{ fontSize: '11px', color: '#ffffff', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
               <span>Resume Chat</span>
               <ArrowRight size={12} />
             </span>
           </div>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#ffffff', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {activeConversation.title || 'Ongoing Conversation'}
           </div>
           <div style={{ fontSize: '11px', color: '#a1a1aa' }}>
@@ -110,22 +165,23 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
         }}
         style={{
           width: '100%',
-          background: '#007acc',
+          background: '#ffffff',
           border: 'none',
-          borderRadius: '6px',
-          height: '42px',
-          color: '#ffffff',
+          borderRadius: '8px',
+          height: '44px',
+          color: '#000000',
           fontSize: '13.5px',
-          fontWeight: 600,
+          fontWeight: 700,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           gap: '8px',
           marginBottom: '10px',
+          boxShadow: '0 1px 4px rgba(0, 0, 0, 0.5)',
         }}
       >
-        <Folder size={16} />
+        <Folder size={16} color="#000000" />
         <span>Open Workspace Explorer</span>
       </button>
 
@@ -134,10 +190,10 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
         onClick={() => triggerHaptic(20)}
         style={{
           width: '100%',
-          background: '#252525',
+          background: '#222224',
           border: '1px solid rgba(255, 255, 255, 0.08)',
-          borderRadius: '6px',
-          height: '42px',
+          borderRadius: '8px',
+          height: '44px',
           color: '#ffffff',
           fontSize: '13.5px',
           fontWeight: 500,
@@ -178,7 +234,7 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
               ws.status === 'waiting_approval'
                 ? '#f59e0b'
                 : ws.status === 'busy'
-                ? '#007acc'
+                ? '#ffffff'
                 : '#10b981';
 
             return (
@@ -190,7 +246,7 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
                 }}
                 style={{
                   background: isSelected ? '#252528' : '#1e1e1e',
-                  border: `1px solid ${isSelected ? '#007acc' : 'rgba(255, 255, 255, 0.08)'}`,
+                  border: `1px solid ${isSelected ? '#ffffff' : 'rgba(255, 255, 255, 0.08)'}`,
                   borderRadius: '8px',
                   padding: '12px 14px',
                   display: 'flex',
@@ -238,7 +294,7 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
                     </span>
                   )}
                   {isSelected && (
-                    <span style={{ fontSize: '11px', color: '#007acc', fontWeight: 600 }}>
+                    <span style={{ fontSize: '11px', color: '#ffffff', fontWeight: 600 }}>
                       Active
                     </span>
                   )}
@@ -321,9 +377,9 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
                       style={{
                         fontSize: '11px',
                         fontWeight: 600,
-                        color: '#38bdf8',
-                        background: 'rgba(56, 189, 248, 0.12)',
-                        border: '1px solid rgba(56, 189, 248, 0.25)',
+                        color: '#ffffff',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.15)',
                         padding: '4px 10px',
                         borderRadius: '4px',
                       }}
@@ -363,7 +419,7 @@ export const HomeScreen = React.memo<HomeScreenProps>(({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <Layers size={20} color="#007acc" />
+            <Layers size={20} color="#ffffff" />
             <div>
               <div style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
                 KYBER Extension Service

@@ -28,15 +28,16 @@ export function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       title="Copy"
       style={{
-        background: 'rgba(255, 255, 255, 0.05)',
-        border: '1px solid rgba(255, 255, 255, 0.1)',
+        background: 'rgba(255, 255, 255, 0.04)',
+        border: '1px solid rgba(255, 255, 255, 0.08)',
         borderRadius: '4px',
         color: copied ? '#4ade80' : '#858585',
-        padding: '2px 6px',
+        padding: '3px 7px',
         display: 'inline-flex',
         alignItems: 'center',
         gap: '4px',
         fontSize: '11px',
+        fontFamily: "'Geist Mono', Consolas, monospace",
         cursor: 'pointer',
       }}
     >
@@ -99,17 +100,17 @@ export const MarkdownContent = React.memo(function MarkdownContent({ content }: 
   );
 });
 
-// --- KYBER Brand Mark (Variation A.3: The Kinetic Shift) ---
+// --- KYBER Brand Mark (Stealth Blade K Monogram: | >>) ---
 export function KyberLogo({
   size = 48,
   className,
-  colorLeft = '#ffffff',
-  colorRight = '#a1a1aa',
+  colorSpine = '#ffffff',
+  colorBlade = '#ffffff',
 }: {
   size?: number;
   className?: string;
-  colorLeft?: string;
-  colorRight?: string;
+  colorSpine?: string;
+  colorBlade?: string;
 }) {
   return (
     <svg
@@ -120,10 +121,12 @@ export function KyberLogo({
       xmlns="http://www.w3.org/2000/svg"
       className={className}
     >
-      {/* Left Staggered Facet (Pure White) */}
-      <polygon points="48.5,18 22,58 48.5,98" fill={colorLeft} />
-      {/* Right Elevated Facet (Platinum Titanium) */}
-      <polygon points="51.5,2 78,42 51.5,82" fill={colorRight} />
+      {/* Monolithic Vertical Spine */}
+      <rect x="18" y="16" width="13" height="68" rx="2.5" fill={colorSpine} />
+      {/* Primary Internal Chevron Blade */}
+      <path d="M52 16 L31 50 L52 84 H39 L22 50 L39 16 H52 Z" fill={colorSpine} />
+      {/* Forward Auxiliary Blade (Antigravity Blue / Electric Ice) */}
+      <path d="M82 16 L61 50 L82 84 H69 L52 50 L69 16 H82 Z" fill={colorBlade} />
     </svg>
   );
 }
@@ -157,7 +160,7 @@ export function FileTypeBadge({ name }: { name: string }) {
   }
   if (ext === 'md') {
     return (
-      <span style={{ fontSize: '10px', fontWeight: 700, color: '#38bdf8', background: 'rgba(56, 189, 248, 0.15)', padding: '1px 3px', borderRadius: '3px', fontFamily: 'monospace' }}>
+      <span style={{ fontSize: '10px', fontWeight: 700, color: '#ffffff', background: 'rgba(255, 255, 255, 0.12)', padding: '1px 3px', borderRadius: '3px', fontFamily: 'monospace' }}>
         M&#8595;
       </span>
     );
@@ -184,4 +187,99 @@ export function FileTypeBadge({ name }: { name: string }) {
     );
   }
   return <File size={13} color="#858585" />;
+}
+
+// --- High-Fidelity Error Boundary ---
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  fallbackTitle?: string;
+  onReset?: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error?: Error;
+}
+
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error('[ErrorBoundary caught error]', error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false, error: undefined });
+    if (this.props.onReset) {
+      this.props.onReset();
+    }
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div
+          style={{
+            padding: '24px 16px',
+            background: '#19191b',
+            border: '1px solid rgba(239, 68, 68, 0.35)',
+            borderRadius: '8px',
+            margin: '12px 0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '12px',
+            alignItems: 'center',
+            textAlign: 'center',
+          }}
+        >
+          <div style={{ fontSize: '13.5px', fontWeight: 600, color: '#f87171' }}>
+            {this.props.fallbackTitle || 'Something went wrong rendering this view'}
+          </div>
+          <div
+            style={{
+              fontSize: '11px',
+              fontFamily: "'Geist Mono', Consolas, monospace",
+              color: '#a1a1aa',
+              maxHeight: '120px',
+              overflowY: 'auto',
+              maxWidth: '100%',
+              background: '#121213',
+              padding: '8px 12px',
+              borderRadius: '6px',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+              wordBreak: 'break-all',
+            }}
+          >
+            {this.state.error?.message || 'Unknown render error'}
+          </div>
+          <button
+            onClick={this.handleReset}
+            style={{
+              background: '#0078d4',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '8px 16px',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+            }}
+          >
+            <span>Reset View</span>
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

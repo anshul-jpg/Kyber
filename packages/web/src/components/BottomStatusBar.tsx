@@ -31,7 +31,7 @@ export const BottomStatusBar: React.FC<BottomStatusBarProps> = ({
         right: 0,
         height: 'calc(26px + env(safe-area-inset-bottom, 0px))',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        background: '#141414',
+        background: '#121213',
         borderTop: '1px solid rgba(255, 255, 255, 0.08)',
         display: 'flex',
         alignItems: 'center',
@@ -48,7 +48,7 @@ export const BottomStatusBar: React.FC<BottomStatusBarProps> = ({
         onClick={handleToggle}
         style={{ display: 'flex', alignItems: 'center', gap: '5px', cursor: 'pointer' }}
       >
-        <Radio size={12} color={isRemote ? '#007acc' : '#858585'} />
+        <Radio size={12} color={isRemote ? '#ffffff' : '#858585'} />
         <span
           style={{
             color: isRemote ? '#ffffff' : '#858585',

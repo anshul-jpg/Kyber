@@ -10,6 +10,7 @@ import {
   ChevronRight,
   RefreshCw,
   ArrowLeft,
+  MessageSquareQuote,
 } from 'lucide-react';
 import { FileTypeBadge, CopyButton, MarkdownContent, triggerHaptic } from './CommonUI';
 import { DiffViewer } from './ApprovalCards';
@@ -65,6 +66,7 @@ interface ActionModalsProps {
   host?: string;
   port?: string;
   initialOpenFile?: { path: string; name: string } | null;
+  onQuoteToChat?: (quote: { uri: string; title: string; range?: { startLine: number; endLine: number } }) => void;
 }
 
 export const ActionModals = React.memo<ActionModalsProps>(({
@@ -80,6 +82,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
   host,
   port,
   initialOpenFile,
+  onQuoteToChat,
 }) => {
   const [workspaceFiles, setWorkspaceFiles] = useState<Record<string, FileEntry[]>>({});
   const [loadingPaths, setLoadingPaths] = useState<Record<string, boolean>>({});
@@ -165,9 +168,14 @@ export const ActionModals = React.memo<ActionModalsProps>(({
     }
   }, [getHttpBase, getAuthHeaders, getAuthToken]);
 
+  const lastActiveWsRef = useRef<string | null>(null);
+
   useEffect(() => {
     setPreviewItem(null);
-    setWorkspaceFiles({});
+    if (activeWorkspaceId && lastActiveWsRef.current !== activeWorkspaceId) {
+      setWorkspaceFiles({});
+      lastActiveWsRef.current = activeWorkspaceId;
+    }
     if (activeActionModal === 'explorer') {
       fetchFiles('');
       if (initialOpenFile) {
@@ -300,16 +308,48 @@ export const ActionModals = React.memo<ActionModalsProps>(({
   };
 
   const renderDirectoryNode = (subPath: string = '', depth: number = 0): React.ReactNode => {
-    const files = workspaceFiles[subPath];
-    if (loadingPaths[subPath] && !files) {
+    if (depth > 8) {
       return (
-        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '6px 8px', fontSize: '11.5px', color: '#858585', fontStyle: 'italic' }}>
-          Scanning directory...
+        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '4px 6px', fontSize: '11px', color: '#858585' }}>
+          Depth limit reached
         </div>
       );
     }
-    if (!files || files.length === 0) {
-      if (loadingPaths[subPath]) return null;
+
+    const files = workspaceFiles[subPath];
+    const isLoading = Boolean(loadingPaths[subPath]);
+
+    if (isLoading && (!files || files.length === 0)) {
+      return (
+        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '6px 8px', fontSize: '11.5px', color: '#858585', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <RefreshCw size={12} className="animate-spin" />
+          <span>Scanning directory...</span>
+        </div>
+      );
+    }
+
+    if (files === undefined) {
+      return (
+        <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '4px 6px', fontSize: '11.5px', color: '#858585' }}>
+          <button
+            onClick={() => fetchFiles(subPath)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#0078d4',
+              fontSize: '11.5px',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+            }}
+          >
+            Load files...
+          </button>
+        </div>
+      );
+    }
+
+    if (files.length === 0) {
       return (
         <div style={{ paddingLeft: `${depth * 16 + 8}px`, padding: '8px 10px', fontSize: '11.5px', color: '#858585', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span>(empty)</span>
@@ -362,7 +402,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                       flexShrink: 0,
                     }}
                   />
-                  <Folder size={14} color="#007acc" style={{ flexShrink: 0 }} />
+                  <Folder size={14} color="#a1a1aa" style={{ flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
                   {loadingPaths[item.path] && (
                     <span style={{ fontSize: '10px', color: '#858585', marginLeft: 'auto' }}>...</span>
@@ -452,7 +492,37 @@ export const ActionModals = React.memo<ActionModalsProps>(({
             {sizeStr && <span style={{ fontSize: '10px', color: '#858585', flexShrink: 0 }}>({sizeStr})</span>}
           </div>
 
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            {onQuoteToChat && previewItem.isText && (
+              <button
+                type="button"
+                onClick={() => {
+                  triggerHaptic(20);
+                  onQuoteToChat({
+                    uri: previewItem.path,
+                    title: previewItem.title,
+                  });
+                  onClose();
+                }}
+                title="Quote to Chat"
+                style={{
+                  background: 'rgba(0, 120, 212, 0.15)',
+                  border: '1px solid rgba(0, 120, 212, 0.3)',
+                  borderRadius: '4px',
+                  color: '#60a5fa',
+                  padding: '3px 7px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                <MessageSquareQuote size={12} />
+                <span>Quote</span>
+              </button>
+            )}
             {previewItem.isText && previewItem.content && (
               <CopyButton text={previewItem.content} />
             )}
@@ -574,11 +644,11 @@ export const ActionModals = React.memo<ActionModalsProps>(({
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {activeActionModal === 'diff' && <FileText size={16} color="#007acc" />}
-            {activeActionModal === 'terminal' && <Terminal size={16} color="#007acc" />}
-            {activeActionModal === 'artifacts' && <ImageIcon size={16} color="#007acc" />}
-            {activeActionModal === 'browser' && <Globe size={16} color="#007acc" />}
-            {activeActionModal === 'explorer' && <Folder size={16} color="#007acc" />}
+            {activeActionModal === 'diff' && <FileText size={16} color="#ffffff" />}
+            {activeActionModal === 'terminal' && <Terminal size={16} color="#ffffff" />}
+            {activeActionModal === 'artifacts' && <ImageIcon size={16} color="#ffffff" />}
+            {activeActionModal === 'browser' && <Globe size={16} color="#ffffff" />}
+            {activeActionModal === 'explorer' && <Folder size={16} color="#ffffff" />}
             <span style={{ fontSize: '13.5px', fontWeight: 600, color: '#ffffff', textTransform: 'capitalize' }}>
               {activeActionModal === 'diff' && 'Changed Files & Diffs'}
               {activeActionModal === 'terminal' && 'Terminal Execution'}
@@ -586,7 +656,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
               {activeActionModal === 'browser' && 'Browser Preview'}
               {activeActionModal === 'explorer' && (
                 <span>
-                  Workspace Explorer <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#0078d4' }}>({activeWorkspaceName || 'Current'})</span>
+                  Workspace Explorer <span style={{ fontSize: '11.5px', fontWeight: 500, color: '#a1a1aa' }}>({activeWorkspaceName || 'Current'})</span>
                 </span>
               )}
             </span>
@@ -617,7 +687,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ffffff', fontWeight: 600 }}>
-                    <Folder size={15} color="#007acc" />
+                    <Folder size={15} color="#a1a1aa" />
                     <span style={{ fontSize: '13px' }}>{activeWorkspaceName || 'Workspace Files'}</span>
                   </div>
                   <button
@@ -827,7 +897,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                               gap: '8px',
                             }}
                           >
-                            <span style={{ color: '#38bdf8', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span style={{ color: '#ffffff', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               $ {entry.command}
                             </span>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
@@ -904,7 +974,7 @@ export const ActionModals = React.memo<ActionModalsProps>(({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: '#ffffff', fontWeight: 600 }}>
-                    <ImageIcon size={15} color="#007acc" />
+                    <ImageIcon size={15} color="#ffffff" />
                     <span style={{ fontSize: '13px' }}>Session Artifacts ({artifacts.length})</span>
                   </div>
                   <button

@@ -17,9 +17,12 @@ import {
   Layers,
   Sparkles,
   X,
+  GitBranch,
 } from 'lucide-react';
 import { FileTypeBadge, triggerHaptic } from './CommonUI';
 import { getApiBaseUrl } from '../utils/api';
+import { GitChangesView } from './GitChangesView';
+import { ScreenSnapshotView } from './ScreenSnapshotView';
 
 export interface FileEntry {
   name: string;
@@ -62,7 +65,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
   onCloseTab,
   onCloseAllTabs,
 }) => {
-  const [activeFilter, setActiveFilter] = useState<'all' | 'tabs' | 'files' | 'projects'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'tabs' | 'files' | 'projects' | 'changes' | 'screen'>('all');
   const [roots, setRoots] = useState<string[]>([]);
   const [loadingRoots, setLoadingRoots] = useState<boolean>(false);
   const [showAddRootModal, setShowAddRootModal] = useState<boolean>(false);
@@ -99,14 +102,14 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
         const data = await res.json();
         if (data.roots) {
           setRoots(data.roots);
-          if (data.roots.length > 0 && !selectedRootForNew) {
-            setSelectedRootForNew(data.roots[0]);
+          if (data.roots.length > 0) {
+            setSelectedRootForNew(prev => prev || data.roots[0]);
           }
         }
       }
     } catch {}
     setLoadingRoots(false);
-  }, [httpBase, authHeaders, selectedRootForNew]);
+  }, [httpBase, authHeaders]);
 
   // Fetch Files in subPath
   const fetchFiles = useCallback(async (subPath: string = '') => {
@@ -142,7 +145,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
     setFileTreeError(null);
     fetchRoots();
     fetchFiles('');
-  }, [activeWorkspaceId, fetchRoots, fetchFiles]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeWorkspaceId]);
 
   const handleAddRoot = async () => {
     if (!newRootInput.trim()) return;
@@ -221,21 +225,50 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
   }, [recentProjects, projectSearch]);
 
   const renderFileNode = (subPath: string, depth: number = 0) => {
-    const items = workspaceFiles[subPath] || [];
-    const isLoading = loadingTreePaths[subPath];
-
-    if (isLoading && items.length === 0) {
+    if (depth > 8) {
       return (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', fontSize: '11px', color: '#71717a' }}>
+        <div style={{ paddingLeft: `${8 + depth * 14}px`, padding: '4px 8px', fontSize: '11px', color: '#71717a' }}>
+          Depth limit reached
+        </div>
+      );
+    }
+
+    const items = workspaceFiles[subPath];
+    const isLoading = Boolean(loadingTreePaths[subPath]);
+
+    if (isLoading && (!items || items.length === 0)) {
+      return (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 12px', paddingLeft: `${8 + depth * 14}px`, fontSize: '11px', color: '#71717a' }}>
           <RefreshCw size={12} className="animate-spin" />
           <span>Loading files...</span>
         </div>
       );
     }
 
-    if (!isLoading && items.length === 0) {
+    if (items === undefined) {
       return (
-        <div style={{ padding: '8px 12px', fontSize: '11.5px', color: '#71717a', fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ padding: '6px 12px', paddingLeft: `${8 + depth * 14}px`, fontSize: '11.5px', color: '#71717a' }}>
+          <button
+            onClick={() => fetchFiles(subPath)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#0078d4',
+              fontSize: '11.5px',
+              cursor: 'pointer',
+              padding: 0,
+              textDecoration: 'underline',
+            }}
+          >
+            Load files...
+          </button>
+        </div>
+      );
+    }
+
+    if (items.length === 0) {
+      return (
+        <div style={{ padding: '8px 12px', paddingLeft: `${8 + depth * 14}px`, fontSize: '11.5px', color: '#71717a', fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span>{fileTreeError || 'No files in this folder'}</span>
           <button
             onClick={() => fetchFiles(subPath)}
@@ -282,7 +315,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                   onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
                 >
                   {isExpanded ? <ChevronDown size={14} color="#71717a" /> : <ChevronRight size={14} color="#71717a" />}
-                  <Folder size={14} color="#0078d4" />
+                  <Folder size={14} color="#a1a1aa" />
                   <span style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {item.name}
                   </span>
@@ -359,7 +392,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
           }}
           style={{
             background: activeFilter === 'all' ? '#27272a' : '#18181b',
-            border: activeFilter === 'all' ? '1px solid rgba(0, 120, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+            border: activeFilter === 'all' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: '6px',
             padding: '5px 10px',
             color: activeFilter === 'all' ? '#ffffff' : '#8e8e93',
@@ -379,7 +412,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
           }}
           style={{
             background: activeFilter === 'tabs' ? '#27272a' : '#18181b',
-            border: activeFilter === 'tabs' ? '1px solid rgba(0, 120, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+            border: activeFilter === 'tabs' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: '6px',
             padding: '5px 10px',
             color: activeFilter === 'tabs' ? '#ffffff' : '#8e8e93',
@@ -408,11 +441,49 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
         <button
           onClick={() => {
             triggerHaptic(15);
+            setActiveFilter('changes');
+          }}
+          style={{
+            background: activeFilter === 'changes' ? '#27272a' : '#18181b',
+            border: activeFilter === 'changes' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '6px',
+            padding: '5px 10px',
+            color: activeFilter === 'changes' ? '#ffffff' : '#8e8e93',
+            fontSize: '11px',
+            fontWeight: activeFilter === 'changes' ? 600 : 500,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <GitBranch size={11} color={activeFilter === 'changes' ? '#ffffff' : '#8e8e93'} />
+          <span>Git Changes</span>
+          {modifiedFiles.length > 0 && (
+            <span
+              style={{
+                background: 'rgba(255, 255, 255, 0.15)',
+                color: '#ffffff',
+                borderRadius: '4px',
+                padding: '1px 4px',
+                fontSize: '10px',
+                fontWeight: 700,
+              }}
+            >
+              {modifiedFiles.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => {
+            triggerHaptic(15);
             setActiveFilter('files');
           }}
           style={{
             background: activeFilter === 'files' ? '#27272a' : '#18181b',
-            border: activeFilter === 'files' ? '1px solid rgba(0, 120, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+            border: activeFilter === 'files' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: '6px',
             padding: '5px 10px',
             color: activeFilter === 'files' ? '#ffffff' : '#8e8e93',
@@ -432,7 +503,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
           }}
           style={{
             background: activeFilter === 'projects' ? '#27272a' : '#18181b',
-            border: activeFilter === 'projects' ? '1px solid rgba(0, 120, 212, 0.4)' : '1px solid rgba(255, 255, 255, 0.08)',
+            border: activeFilter === 'projects' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: '6px',
             padding: '5px 10px',
             color: activeFilter === 'projects' ? '#ffffff' : '#8e8e93',
@@ -448,8 +519,8 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
           <span>Code Roots & Projects</span>
           <span
             style={{
-              background: 'rgba(0, 120, 212, 0.2)',
-              color: '#60a5fa',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: '#ffffff',
               borderRadius: '4px',
               padding: '1px 4px',
               fontSize: '10px',
@@ -458,7 +529,51 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
             {recentProjects.length}
           </span>
         </button>
+
+        <button
+          onClick={() => {
+            triggerHaptic(15);
+            setActiveFilter('screen');
+          }}
+          style={{
+            background: activeFilter === 'screen' ? '#27272a' : '#18181b',
+            border: activeFilter === 'screen' ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '6px',
+            padding: '5px 10px',
+            color: activeFilter === 'screen' ? '#ffffff' : '#8e8e93',
+            fontSize: '11px',
+            fontWeight: activeFilter === 'screen' ? 600 : 500,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <Monitor size={11} color={activeFilter === 'screen' ? '#ffffff' : '#8e8e93'} />
+          <span>Desktop Screen</span>
+        </button>
       </div>
+
+      {/* SECTION: Desktop Screen Snapshot */}
+      {activeFilter === 'screen' && (
+        <ScreenSnapshotView
+          host={host}
+          port={port}
+          getAuthHeaders={getAuthHeaders}
+          activeWorkspaceId={activeWorkspaceId}
+        />
+      )}
+
+      {/* SECTION: Git Working Tree Changes */}
+      {activeFilter === 'changes' && (
+        <GitChangesView
+          host={host}
+          port={port}
+          getAuthHeaders={getAuthHeaders}
+          activeWorkspaceId={activeWorkspaceId}
+        />
+      )}
 
       {/* SECTION 1: Open Editor Tabs */}
       {(activeFilter === 'all' || activeFilter === 'tabs') && (
@@ -475,7 +590,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Layers size={14} color="#0078d4" />
+              <Layers size={14} color="#ffffff" />
               <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
                 Open Tabs on PC ({tabs.length})
               </span>
@@ -532,7 +647,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                     key={`${tab.path || tab.label}-${idx}`}
                     style={{
                       background: isActive ? '#222226' : '#1c1c1f',
-                      border: isActive ? '1px solid rgba(0, 120, 212, 0.35)' : '1px solid rgba(255, 255, 255, 0.05)',
+                      border: isActive ? '1px solid rgba(255, 255, 255, 0.25)' : '1px solid rgba(255, 255, 255, 0.05)',
                       borderRadius: '6px',
                       padding: '8px 10px',
                       display: 'flex',
@@ -598,20 +713,20 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                         }}
                         title="Focus on PC"
                         style={{
-                          background: isActive ? '#0078d4' : '#27272a',
-                          border: 'none',
+                          background: isActive ? '#ffffff' : '#27272a',
+                          border: isActive ? 'none' : '1px solid rgba(255, 255, 255, 0.08)',
                           borderRadius: '5px',
                           padding: '5px 8px',
-                          color: '#ffffff',
+                          color: isActive ? '#000000' : '#ffffff',
                           fontSize: '11px',
-                          fontWeight: 500,
+                          fontWeight: isActive ? 700 : 500,
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
                           gap: '4px',
                         }}
                       >
-                        <Monitor size={11} />
+                        <Monitor size={11} color={isActive ? '#000000' : '#ffffff'} />
                         <span>{isActive ? 'Active' : 'Focus'}</span>
                       </button>
 
@@ -686,7 +801,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Folder size={14} color="#0078d4" />
+              <Folder size={14} color="#a1a1aa" />
               <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
                 Files in {activeWorkspaceName || 'Workspace'}
               </span>
@@ -742,7 +857,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '6px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Sparkles size={14} color="#0078d4" />
+              <Sparkles size={14} color="#ffffff" />
               <span style={{ fontSize: '12.5px', fontWeight: 600, color: '#ffffff' }}>
                 Code Roots & Projects Hub
               </span>
@@ -778,21 +893,21 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                   setShowNewProjectModal(true);
                 }}
                 style={{
-                  background: '#0078d4',
+                  background: '#ffffff',
                   border: 'none',
                   borderRadius: '5px',
                   padding: '4px 9px',
-                  color: '#ffffff',
+                  color: '#000000',
                   fontSize: '11px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  boxShadow: '0 1px 6px rgba(0, 120, 212, 0.3)',
+                  boxShadow: '0 1px 6px rgba(0, 0, 0, 0.4)',
                 }}
               >
-                <FolderPlus size={11} />
+                <FolderPlus size={11} color="#000000" />
                 <span>New Project</span>
               </button>
             </div>
@@ -820,7 +935,7 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                     color: '#e4e4e7',
                   }}
                 >
-                  <Folder size={11} color="#0078d4" />
+                  <Folder size={11} color="#a1a1aa" />
                   <span>{r}</span>
                   {roots.length > 1 && (
                     <button
@@ -941,11 +1056,11 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                       }
                     }}
                     style={{
-                      background: launchingProject === p.path ? '#0078d4' : '#27272a',
+                      background: launchingProject === p.path ? '#ffffff' : '#27272a',
                       border: '1px solid rgba(255, 255, 255, 0.08)',
                       borderRadius: '5px',
                       padding: '5px 8px',
-                      color: launchingProject === p.path ? '#ffffff' : '#0078d4',
+                      color: launchingProject === p.path ? '#000000' : '#ffffff',
                       fontSize: '11px',
                       fontWeight: 600,
                       cursor: launchingProject === p.path ? 'default' : 'pointer',
@@ -1053,13 +1168,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                 onClick={handleAddRoot}
                 disabled={!newRootInput.trim()}
                 style={{
-                  background: '#0078d4',
+                  background: '#ffffff',
                   border: 'none',
                   borderRadius: '5px',
                   padding: '6px 14px',
-                  color: '#ffffff',
+                  color: '#000000',
                   fontSize: '11.5px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   cursor: 'pointer',
                 }}
               >
@@ -1177,13 +1292,13 @@ export const WorkspaceView: React.FC<WorkspaceViewProps> = React.memo(({
                 onClick={handleCreateProject}
                 disabled={!newProjectName.trim() || !selectedRootForNew || creatingProject}
                 style={{
-                  background: '#0078d4',
+                  background: '#ffffff',
                   border: 'none',
                   borderRadius: '5px',
                   padding: '6px 14px',
-                  color: '#ffffff',
+                  color: '#000000',
                   fontSize: '11.5px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   cursor: 'pointer',
                   opacity: creatingProject ? 0.6 : 1,
                 }}

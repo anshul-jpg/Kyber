@@ -2,10 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none'%3E%3Cpolygon points='48.5,18 22,58 48.5,98' fill='%23ffffff'/%3E%3Cpolygon points='51.5,2 78,42 51.5,82' fill='%23a1a1aa'/%3E%3C/svg%3E" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' fill='none'%3E%3Crect x='18' y='16' width='13' height='68' rx='2.5' fill='%23ffffff'/%3E%3Cpath d='M52 16 L31 50 L52 84 H39 L22 50 L39 16 H52 Z' fill='%23ffffff'/%3E%3Cpath d='M82 16 L61 50 L82 84 H69 L52 50 L69 16 H82 Z' fill='%23ffffff'/%3E%3C/svg%3E" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-    <meta name="theme-color" content="#181818" />
-    <title>KYBER</title>
+    <meta name="theme-color" content="#000000" />
+    <title>kyber.</title>
     <style>
       :root {
         --sat: env(safe-area-inset-top, 0px);
@@ -22,10 +22,14 @@
       html, body {
         height: 100%;
         width: 100%;
-        background-color: #141414;
-        color: #e2e8f0;
-        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        background-color: #000000;
+        color: #ededed;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+        font-variant-numeric: tabular-nums;
+        text-wrap: pretty;
         overflow: hidden;
       }
       #root {
@@ -35,22 +39,31 @@
         flex-direction: column;
       }
 
-      /* Custom mobile scrollbar */
+      /* Tactile press feedback helper */
+      button, [role="button"] {
+        touch-action: manipulation;
+        transition: transform 100ms cubic-bezier(0.2, 0, 0, 1), opacity 100ms ease;
+      }
+      button:active:not(:disabled), [role="button"]:active {
+        transform: scale(0.96);
+      }
+
+      /* Obsidian mobile scrollbar */
       ::-webkit-scrollbar {
-        width: 4px;
-        height: 4px;
+        width: 3px;
+        height: 3px;
       }
       ::-webkit-scrollbar-track {
         background: transparent;
       }
       ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.15);
-        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.12);
+        border-radius: 3px;
       }
 
       /* Standardized Scalable Mobile Typography */
       .prose-antigravity {
-        color: #d4d4d4;
+        color: #d4d4d8;
         font-size: clamp(13.5px, 3.8vw, 15px);
         line-height: 1.6;
         letter-spacing: -0.01em;
@@ -82,7 +95,7 @@
       .prose-antigravity h3 {
         font-size: clamp(14px, 3.6vw, 15.5px);
         font-weight: 600;
-        color: #f1f5f9;
+        color: #f4f4f5;
         margin: 14px 0 6px 0;
         line-height: 1.4;
       }
@@ -109,40 +122,42 @@
       }
 
       .prose-antigravity a {
-        color: #38bdf8;
+        color: #ffffff;
         text-decoration: underline;
+        text-decoration-color: rgba(255, 255, 255, 0.4);
         text-underline-offset: 3px;
         word-break: break-all;
       }
 
       .prose-antigravity hr {
         border: none;
-        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
         margin: 16px 0;
       }
 
       .prose-antigravity blockquote {
-        border-left: 3px solid #0078d4;
-        background: rgba(0, 120, 212, 0.08);
+        border-left: 2px solid rgba(255, 255, 255, 0.4);
+        background: rgba(255, 255, 255, 0.04);
         padding: 8px 12px;
         margin: 12px 0;
         border-radius: 0 6px 6px 0;
-        color: #94a3b8;
+        color: #a1a1aa;
       }
 
       .prose-antigravity code {
         font-family: 'Geist Mono', Consolas, 'Fira Code', monospace;
         font-size: 12.5px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #93c5fd;
+        background: rgba(255, 255, 255, 0.06);
+        color: #f4f4f5;
         padding: 2px 6px;
         border-radius: 4px;
+        border: 1px solid rgba(255, 255, 255, 0.06);
       }
 
       .prose-antigravity pre {
         margin: 12px 0;
         padding: 12px 14px;
-        background: #101010;
+        background: #181818;
         border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         overflow-x: auto;
@@ -153,13 +168,14 @@
       .prose-antigravity pre code {
         background: transparent;
         padding: 0;
-        color: #e2e8f0;
+        color: #e4e4e7;
         font-size: 12px;
         line-height: 1.5;
         white-space: pre;
+        border: none;
       }
 
-      /* Responsive Touch-Scrollable Markdown Tables (Zero Crushed Words) */
+      /* Responsive Touch-Scrollable Markdown Tables */
       .prose-antigravity table {
         display: block;
         width: 100%;
@@ -168,21 +184,21 @@
         -webkit-overflow-scrolling: touch;
         border-collapse: collapse;
         margin: 14px 0;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        border: 1px solid rgba(255, 255, 255, 0.08);
         border-radius: 8px;
         background: #181818;
       }
 
       .prose-antigravity thead {
-        background: rgba(255, 255, 255, 0.05);
-        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
 
       .prose-antigravity th {
         padding: 10px 14px;
-        font-size: 12px;
+        font-size: 11.5px;
         font-weight: 600;
-        color: #f8fafc;
+        color: #f4f4f5;
         text-align: left;
         white-space: nowrap;
         letter-spacing: 0.03em;
@@ -194,7 +210,7 @@
         padding: 10px 14px;
         font-size: 13.5px;
         line-height: 1.5;
-        color: #cbd5e1;
+        color: #d4d4d8;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         border-right: 1px solid rgba(255, 255, 255, 0.06);
         min-width: 135px;
@@ -206,7 +222,7 @@
 
       .prose-antigravity td:first-child {
         font-weight: 500;
-        color: #f1f5f9;
+        color: #ffffff;
         min-width: 105px;
       }
 
@@ -220,7 +236,7 @@
       }
 
       .prose-antigravity tr:nth-child(even) td {
-        background: rgba(255, 255, 255, 0.015);
+        background: rgba(255, 255, 255, 0.02);
       }
     </style>
   </head>

@@ -14,9 +14,21 @@ build/
 .agy-companion-roots.json
 .agy-companion-recent.json
 *.apk
-.agents/local-notes/
+*.vsix
 
-# Local context and roadmaps (kept locally in root, never tracked by git)
+# Editor and workspace settings
+.vscode/
+.agents/
+interceptor.js
+
+# Local guidelines and development specs
+AGENTS.md
+skills-lock.json
+docs/audits/
+scripts/
+assets/brand/
+
+# Local context and architecture notes
 BRAND.md
 CHECKPOINT.md
 CONNECTIVITY_GUIDE.md
@@ -28,3 +40,4 @@ OPEN_SOURCE_APPROACH.md
 PERSONAL_APPROACH.md
 RESTART_STATE.md
 ROADMAP.md
+ROADMAP_COMPETITORS.md
