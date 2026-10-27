@@ -106,7 +106,7 @@ const AudioPlayerBubble: React.FC<{ audio: AudioAttachment }> = ({ audio }) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '11px', color: '#a1a1aa' }}>
           <span style={{ fontWeight: 600, color: '#e4e4e7', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Mic size={11} color="#007acc" />
+            <Mic size={11} color="#ffffff" />
             <span>{audio.name || 'Voice Note'}</span>
           </span>
           <span style={{ fontFamily: 'monospace' }}>
@@ -133,7 +133,7 @@ const AudioPlayerBubble: React.FC<{ audio: AudioAttachment }> = ({ audio }) => {
             style={{
               width: `${progress}%`,
               height: '100%',
-              background: '#007acc',
+              background: '#ffffff',
               borderRadius: '2px',
             }}
           />
@@ -156,6 +156,8 @@ interface ChatFeedProps {
   thinkingElapsed: number;
   isQueued: boolean;
   onDismissQueued?: () => void;
+  ideStatus?: 'active' | 'dormant';
+  onLaunchIde?: () => void;
 }
 
 export const ChatFeed = React.memo<ChatFeedProps>(({
@@ -171,6 +173,8 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
   thinkingElapsed,
   isQueued,
   onDismissQueued,
+  ideStatus = 'active',
+  onLaunchIde,
 }) => {
   const isLastMessageAnswered =
     chatMessages.length > 0 &&
@@ -179,17 +183,58 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
 
   return (
     <>
+      {ideStatus === 'dormant' && onLaunchIde && (
+        <div
+          style={{
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.25)',
+            borderRadius: '6px',
+            padding: '8px 12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '8px',
+          }}
+        >
+          <span style={{ fontSize: '11px', color: '#fbbf24', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fbbf24' }} />
+            Antigravity IDE is closed on PC
+          </span>
+          <button
+            onClick={() => {
+              triggerHaptic(30);
+              onLaunchIde();
+            }}
+            style={{
+              background: '#22c55e',
+              color: '#000000',
+              border: 'none',
+              borderRadius: '4px',
+              padding: '3px 8px',
+              fontSize: '11px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            <Play size={10} fill="#000000" />
+            Launch on PC
+          </button>
+        </div>
+      )}
       {chatMessages.map((msg, index) => {
         if (msg.role === 'user') {
           return (
             <div
               key={msg.id || index}
               style={{
-                background: '#1e1e1e',
+                background: '#0d0d0e',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
                 borderRadius: '8px',
                 padding: '10px 14px',
-                color: '#ffffff',
+                color: '#ededed',
                 fontSize: 'clamp(13.5px, 3.8vw, 15px)',
                 lineHeight: '1.55',
                 overflowWrap: 'break-word',
@@ -237,10 +282,10 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                       triggerHaptic(15);
                     }}
                     style={{
-                      background: isThoughtOpen ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255, 255, 255, 0.04)',
-                      border: `1px solid ${isThoughtOpen ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      background: isThoughtOpen ? '#141416' : '#0d0d0e',
+                      border: `1px solid ${isThoughtOpen ? 'rgba(255, 255, 255, 0.16)' : 'rgba(255, 255, 255, 0.08)'}`,
                       borderRadius: '6px',
-                      color: isThoughtOpen ? '#38bdf8' : '#94a3b8',
+                      color: isThoughtOpen ? '#ffffff' : '#a1a1aa',
                       fontSize: '11.5px',
                       cursor: 'pointer',
                       display: 'inline-flex',
@@ -248,14 +293,17 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                       gap: '6px',
                       padding: '4px 10px',
                       fontFamily: "'Geist Mono', Consolas, monospace",
-                      transition: 'all 0.15s ease',
+                      transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
                     }}
                   >
-                    <Brain size={12} color={isThoughtOpen ? '#38bdf8' : '#64748b'} />
-                    <span>Thinking Process</span>
-                    <span style={{ fontSize: '10px', color: '#64748b' }}>({msg.thought.split(/\s+/).filter(Boolean).length} words)</span>
+                    <Brain size={12} color={isThoughtOpen ? '#ffffff' : '#71717a'} />
+                    <span style={{ fontWeight: 500 }}>Thinking Process</span>
+                    <span style={{ fontSize: '10px', color: '#71717a', fontVariantNumeric: 'tabular-nums' }}>
+                      ({msg.thought.split(/\s+/).filter(Boolean).length} words)
+                    </span>
                     <ChevronRight
                       size={11}
+                      color="#71717a"
                       style={{
                         transform: isThoughtOpen ? 'rotate(90deg)' : 'none',
                         transition: 'transform 0.15s ease',
@@ -266,17 +314,17 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   {isThoughtOpen && (
                     <div
                       style={{
-                        background: '#141414',
+                        background: '#141415',
                         border: '1px solid rgba(255, 255, 255, 0.08)',
                         borderRadius: '8px',
                         padding: '10px 12px',
                         fontSize: '11.5px',
-                        color: '#cbd5e1',
+                        color: '#d4d4d8',
                         fontFamily: "'Geist Mono', Consolas, monospace",
                         maxHeight: '260px',
                         overflowY: 'auto',
                         marginTop: '6px',
-                        lineHeight: '1.5',
+                        lineHeight: '1.55',
                         whiteSpace: 'pre-wrap',
                       }}
                     >
@@ -289,14 +337,18 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
               {/* Markdown Message Content */}
               <MarkdownContent content={msg.content} />
 
-              {/* 4 Quick-Action Icons Bar */}
+              {/* Quick-Action Tool Shelf (Diff, Terminal, Artifacts, Browser) */}
               <div
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '12px',
-                  paddingTop: '6px',
-                  paddingBottom: '2px',
+                  gap: '4px',
+                  background: '#0d0d0e',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: '6px',
+                  padding: '2px 5px',
+                  marginTop: '6px',
+                  width: 'fit-content',
                 }}
               >
                 <button
@@ -308,16 +360,24 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#858585',
-                    padding: '4px',
+                    color: '#a1a1aa',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
                     cursor: 'pointer',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: '5px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    fontFamily: "'Geist Mono', monospace",
+                    transition: 'background 120ms ease, color 120ms ease',
                   }}
                 >
-                  <FileText size={16} />
+                  <FileText size={12} color="#ededed" />
+                  <span>diff</span>
                 </button>
+
+                <div style={{ width: '1px', height: '12px', background: 'rgba(255, 255, 255, 0.08)' }} />
 
                 <button
                   onClick={() => {
@@ -328,16 +388,24 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#858585',
-                    padding: '4px',
+                    color: '#a1a1aa',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
                     cursor: 'pointer',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: '5px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    fontFamily: "'Geist Mono', monospace",
+                    transition: 'background 120ms ease, color 120ms ease',
                   }}
                 >
-                  <Terminal size={16} />
+                  <Terminal size={12} color="#ededed" />
+                  <span>terminal</span>
                 </button>
+
+                <div style={{ width: '1px', height: '12px', background: 'rgba(255, 255, 255, 0.08)' }} />
 
                 <button
                   onClick={() => {
@@ -348,30 +416,38 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#858585',
-                    padding: '4px',
+                    color: '#a1a1aa',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
                     cursor: 'pointer',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: '5px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    fontFamily: "'Geist Mono', monospace",
                     position: 'relative',
+                    transition: 'background 120ms ease, color 120ms ease',
                   }}
                 >
-                  <ImageIcon size={16} />
+                  <ImageIcon size={12} color="#ededed" />
+                  <span>artifacts</span>
                   {hasArtifacts && (
                     <span
                       style={{
                         position: 'absolute',
-                        top: '2px',
-                        right: '2px',
-                        width: '7px',
-                        height: '7px',
+                        top: '4px',
+                        right: '4px',
+                        width: '4px',
+                        height: '4px',
                         borderRadius: '50%',
-                        background: '#0098ff',
+                        background: '#ffffff',
                       }}
                     />
                   )}
                 </button>
+
+                <div style={{ width: '1px', height: '12px', background: 'rgba(255, 255, 255, 0.08)' }} />
 
                 <button
                   onClick={() => {
@@ -382,15 +458,21 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   style={{
                     background: 'transparent',
                     border: 'none',
-                    color: '#858585',
-                    padding: '4px',
+                    color: '#a1a1aa',
+                    padding: '4px 8px',
+                    borderRadius: '4px',
                     cursor: 'pointer',
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
+                    gap: '5px',
+                    fontSize: '11px',
+                    fontWeight: 500,
+                    fontFamily: "'Geist Mono', monospace",
+                    transition: 'background 120ms ease, color 120ms ease',
                   }}
                 >
-                  <Globe size={16} />
+                  <Globe size={12} color="#ededed" />
+                  <span>browser</span>
                 </button>
               </div>
 
@@ -456,10 +538,10 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                       triggerHaptic(15);
                     }}
                     style={{
-                      background: isThoughtOpen ? 'rgba(56, 189, 248, 0.1)' : 'rgba(255, 255, 255, 0.04)',
-                      border: `1px solid ${isThoughtOpen ? 'rgba(56, 189, 248, 0.3)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      background: isThoughtOpen ? '#202022' : '#181818',
+                      border: `1px solid ${isThoughtOpen ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.08)'}`,
                       borderRadius: '6px',
-                      color: isThoughtOpen ? '#38bdf8' : '#94a3b8',
+                      color: isThoughtOpen ? '#f4f4f5' : '#a1a1aa',
                       fontSize: '11.5px',
                       cursor: 'pointer',
                       display: 'inline-flex',
@@ -467,14 +549,17 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                       gap: '6px',
                       padding: '4px 10px',
                       fontFamily: "'Geist Mono', Consolas, monospace",
-                      transition: 'all 0.15s ease',
+                      transition: 'background 120ms ease, border-color 120ms ease, color 120ms ease',
                     }}
                   >
-                    <Brain size={12} color={isThoughtOpen ? '#38bdf8' : '#64748b'} />
-                    <span>Thinking Process</span>
-                    <span style={{ fontSize: '10px', color: '#64748b' }}>({msg.thought.split(/\s+/).filter(Boolean).length} words)</span>
+                    <Brain size={12} color={isThoughtOpen ? '#e4e4e7' : '#71717a'} />
+                    <span style={{ fontWeight: 500 }}>Thinking Process</span>
+                    <span style={{ fontSize: '10px', color: '#71717a', fontVariantNumeric: 'tabular-nums' }}>
+                      ({msg.thought.split(/\s+/).filter(Boolean).length} words)
+                    </span>
                     <ChevronRight
                       size={11}
+                      color="#71717a"
                       style={{
                         transform: isThoughtOpen ? 'rotate(90deg)' : 'none',
                         transition: 'transform 0.15s ease',
@@ -485,18 +570,18 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   {isThoughtOpen && (
                     <div
                       style={{
-                        background: '#141414',
+                        background: '#141415',
                         border: '1px solid rgba(255, 255, 255, 0.08)',
                         borderRadius: '8px',
                         padding: '10px 12px',
                         fontSize: '11.5px',
-                        color: '#cbd5e1',
+                        color: '#d4d4d8',
                         fontFamily: "'Geist Mono', Consolas, monospace",
                         maxHeight: '260px',
                         overflowY: 'auto',
                         marginTop: '6px',
                         whiteSpace: 'pre-wrap',
-                        lineHeight: '1.5',
+                        lineHeight: '1.55',
                       }}
                     >
                       {msg.thought}
@@ -508,9 +593,9 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
               {/* Tool Step Card */}
               <div
                 style={{
-                  background: '#1e1e1e',
+                  background: '#181818',
                   border: '1px solid rgba(255, 255, 255, 0.08)',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   padding: '8px 12px',
                   display: 'flex',
                   alignItems: 'center',
@@ -570,14 +655,13 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
       {(isStreaming || currentThinking) && currentThinking && !isLastMessageAnswered && (
         <div
           style={{
-            background: '#141414',
-            border: '1px solid rgba(0, 122, 204, 0.35)',
+            background: '#181818',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
             borderRadius: '10px',
             padding: '10px 14px',
             display: 'flex',
             flexDirection: 'column',
             gap: '8px',
-            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.4), 0 0 12px rgba(56, 189, 248, 0.1)',
           }}
         >
           <div
@@ -598,19 +682,18 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
                   width: '7px',
                   height: '7px',
                   borderRadius: '50%',
-                  background: '#38bdf8',
+                  background: '#ffffff',
                   display: 'inline-block',
-                  boxShadow: '0 0 8px #38bdf8',
                 }}
               />
-              <span style={{ fontSize: '12px', fontWeight: 600, color: '#f8fafc', letterSpacing: '-0.01em' }}>
+              <span style={{ fontSize: '12px', fontWeight: 600, color: '#ffffff', letterSpacing: '-0.01em' }}>
                 Model Thinking {thinkingElapsed > 0 ? `(${thinkingElapsed}s)` : ''}
               </span>
               <span
                 style={{
                   fontSize: '10px',
-                  background: 'rgba(56, 189, 248, 0.15)',
-                  color: '#38bdf8',
+                  background: 'rgba(255, 255, 255, 0.12)',
+                  color: '#ffffff',
                   padding: '1px 6px',
                   borderRadius: '4px',
                   fontFamily: "'Geist Mono', monospace",
@@ -622,7 +705,7 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
             </div>
             <ChevronRight
               size={14}
-              color="#94a3b8"
+              color="#71717a"
               style={{
                 transform: isCurrentThoughtExpanded ? 'rotate(90deg)' : 'none',
                 transition: 'transform 0.15s ease',
@@ -632,16 +715,16 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
           {isCurrentThoughtExpanded && (
             <div
               style={{
-                background: '#040711',
-                border: '1px solid rgba(255, 255, 255, 0.06)',
-                borderRadius: '7px',
+                background: '#141415',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '8px',
                 padding: '10px 12px',
                 fontSize: '11.5px',
-                color: '#94a3b8',
+                color: '#d4d4d8',
                 fontFamily: "'Geist Mono', Consolas, monospace",
                 maxHeight: '220px',
                 overflowY: 'auto',
-                lineHeight: '1.5',
+                lineHeight: '1.55',
                 whiteSpace: 'pre-wrap',
               }}
             >
@@ -709,7 +792,7 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
             alignItems: 'center',
             gap: '8px',
             padding: '6px 4px',
-            color: '#38bdf8',
+            color: '#ffffff',
             fontSize: '12px',
           }}
         >
@@ -718,7 +801,7 @@ export const ChatFeed = React.memo<ChatFeedProps>(({
               width: '6px',
               height: '6px',
               borderRadius: '50%',
-              background: '#0284c7',
+              background: '#ffffff',
               display: 'inline-block',
             }}
           />

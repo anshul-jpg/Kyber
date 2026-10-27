@@ -50,6 +50,7 @@ export interface CompanionSocketOptions {
   setCurrentThinking: React.Dispatch<React.SetStateAction<string | null>>;
   setIsQueued: React.Dispatch<React.SetStateAction<boolean>>;
   setActiveSessionBackup: React.Dispatch<React.SetStateAction<any>>;
+  setSelectedModel?: React.Dispatch<React.SetStateAction<string>>;
   getAuthHeaders: () => Record<string, string>;
 }
 
@@ -60,6 +61,8 @@ export interface CompanionSocketReturn {
   reconnectTick: number;
   setReconnectTick: React.Dispatch<React.SetStateAction<number>>;
   sendClientMessage: (msg: WsClientMessage) => boolean;
+  resolveFileDiff: (fileUri: string, action: 'accept' | 'reject') => void;
+  searchConversations: (query: string) => void;
   wsRef: React.MutableRefObject<WebSocket | null>;
 }
 
@@ -233,6 +236,12 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
             }
             if (msg.agentQuotas && msg.agentQuotas.length > 0) {
               setAgentQuotas(msg.agentQuotas);
+              if (options.setSelectedModel) {
+                const active = msg.agentQuotas.find(q => q.isActive);
+                if (active) {
+                  options.setSelectedModel(active.name);
+                }
+              }
             }
             if (msg.activeTabs) {
               setEditorTabs(msg.activeTabs);
@@ -261,6 +270,18 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
             if (msg.entry) {
               setTerminalEntries(prev => [...prev.slice(-99), msg.entry]);
             }
+            break;
+
+          case 'server:task_output':
+            setTerminalEntries(prev => [
+              ...prev.slice(-99),
+              {
+                id: `task_${msg.stepIndex}_${msg.timestamp}`,
+                command: `Task #${msg.stepIndex}`,
+                output: msg.logChunk,
+                timestamp: msg.timestamp,
+              },
+            ]);
             break;
 
           case 'server:host_telemetry':
@@ -427,8 +448,20 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
             localStorage.setItem('agy_execution_policy', msg.policy);
             break;
 
+          case 'server:model_updated':
+            if (msg.model && options.setSelectedModel) {
+              options.setSelectedModel(msg.model);
+            }
+            break;
+
           case 'server:agent_quotas':
             setAgentQuotas(msg.quotas);
+            if (options.setSelectedModel) {
+              const active = msg.quotas.find(q => q.isActive);
+              if (active) {
+                options.setSelectedModel(active.name);
+              }
+            }
             break;
 
           case 'server:approval_requested':
@@ -614,6 +647,22 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
     };
   }, [host, port, reconnectTick]);
 
+  const resolveFileDiff = useCallback((fileUri: string, action: 'accept' | 'reject') => {
+    sendClientMessage({
+      type: 'client:resolve_file_diff',
+      fileUri,
+      action,
+    });
+  }, [sendClientMessage]);
+
+  const searchConversations = useCallback((query: string) => {
+    sendClientMessage({
+      type: 'client:search_conversations',
+      query,
+      workspaceId: activeWorkspaceId,
+    });
+  }, [sendClientMessage, activeWorkspaceId]);
+
   return {
     connected,
     authError,
@@ -621,6 +670,8 @@ export function useCompanionSocket(options: CompanionSocketOptions): CompanionSo
     reconnectTick,
     setReconnectTick,
     sendClientMessage,
+    resolveFileDiff,
+    searchConversations,
     wsRef,
   };
 }

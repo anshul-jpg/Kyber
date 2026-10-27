@@ -22,6 +22,7 @@ import {
   TerminalEntry,
   HostTelemetry,
   ChatMessage,
+  PromptContextChunk,
 } from '@agy-companion/protocol';
 import { HookIpcServer, getWorkspaceGitChanges } from '../hooks/ipc-server.js';
 import { WorkspaceManager } from '../session/workspace-manager.js';
@@ -31,6 +32,7 @@ import { closeProvider, restartProvider, getHostTelemetry } from '../provider/pr
 import { killStalePort } from './port-cleaner.js';
 import { handleHttpRequest } from './http-api.js';
 import { CodeRootsManager } from '../session/code-roots.js';
+import { getLiveAgentQuotas, setDirectLanguageServerCredentials } from '../session/quota-tracker.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
 const _dirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(_filename);
@@ -172,11 +174,17 @@ export class WsGateway {
   public getApkDetails(): { hasApk: boolean; apkBuildTime?: number; size?: number } {
     try {
       const candidateApkPaths = [
+        path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
         path.resolve(_dirname, '../apk/app-debug.apk'),
         path.resolve(_dirname, '../web/app-debug.apk'),
-        path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+        path.resolve(process.cwd(), 'packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+        path.resolve(process.cwd(), 'packages/cli/dist/apk/app-debug.apk'),
       ];
-      const apkPath = candidateApkPaths.find(p => fs.existsSync(p));
+      const existingApks = candidateApkPaths
+        .filter(p => fs.existsSync(p))
+        .map(p => ({ path: p, mtime: fs.statSync(p).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      const apkPath = existingApks[0]?.path;
       if (apkPath) {
         const stat = fs.statSync(apkPath);
         return { hasApk: true, apkBuildTime: stat.mtimeMs, size: stat.size };
@@ -400,6 +408,22 @@ export class WsGateway {
       const globalPath = this.getGlobalPolicyFilePath();
       fs.writeFileSync(globalPath, policy, 'utf8');
       console.log(`[WsGateway] Execution policy set to: ${policy} (saved globally to ${globalPath})`);
+
+      // Lock global Antigravity IDE User settings.json
+      try {
+        const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+        const settingsPath = path.join(appData, 'Antigravity IDE', 'User', 'settings.json');
+        if (fs.existsSync(settingsPath)) {
+          const raw = fs.readFileSync(settingsPath, 'utf8');
+          const settings = JSON.parse(raw);
+          const targetVal = policy === 'always_proceed' ? 'always-proceed' : 'always-ask';
+          settings['antigravity.toolExecutionPolicy'] = targetVal;
+          settings['antigravity.autoExecutionPolicy'] = targetVal;
+          settings['antigravity.artifactReviewMode'] = targetVal;
+          fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+        }
+      } catch {}
+
       this.broadcast({
         type: 'server:execution_policy_updated',
         policy,
@@ -440,6 +464,15 @@ export class WsGateway {
       });
     });
 
+    this.ideWatcher.on('task_output', (data: { stepIndex: number; logChunk: string; timestamp: number }) => {
+      this.broadcast({
+        type: 'server:task_output',
+        stepIndex: data.stepIndex,
+        logChunk: data.logChunk,
+        timestamp: data.timestamp,
+      });
+    });
+
     this.ideWatcher.on('conversation_switched', data => {
       const activeWs = this.workspaceManager.listWorkspaces()[0];
       const wsId = activeWs ? activeWs.id : 'default';
@@ -448,6 +481,20 @@ export class WsGateway {
         workspaceId: wsId,
         messages: data.history,
         conversationTitle: data.title,
+      });
+    });
+
+    this.ideWatcher.on('quotas_updated', (quotas: any[]) => {
+      this.broadcast({
+        type: 'server:agent_quotas',
+        quotas,
+      });
+    });
+
+    this.ideWatcher.on('model_updated', (model: string) => {
+      this.broadcast({
+        type: 'server:model_updated',
+        model,
       });
     });
   }
@@ -574,12 +621,22 @@ export class WsGateway {
         for (const name of Object.keys(interfaces)) {
           for (const iface of interfaces[name] || []) {
             if (iface.family === 'IPv4' && !iface.internal) {
-              if (name.toLowerCase().includes('tailscale') || iface.address.startsWith('100.')) {
+              if (iface.address.startsWith('100.')) {
                 tailscaleIp = iface.address;
                 break;
               }
             }
           }
+          if (tailscaleIp) break;
+        }
+
+        if (!tailscaleIp) {
+          try {
+            const out = execSync('tailscale ip -4', { encoding: 'utf8', timeout: 1500, windowsHide: true }).trim();
+            if (out && out.startsWith('100.')) {
+              tailscaleIp = out;
+            }
+          } catch {}
         }
 
         // Reconcile workspace pending approvals against active hook requests before sending hello
@@ -1069,6 +1126,18 @@ export class WsGateway {
         break;
       }
 
+      case 'client:search_conversations': {
+        const wsId = (msg as any).workspaceId;
+        const targetWs = wsId ? this.workspaceManager.getWorkspace(wsId) : null;
+        ws.send(
+          JSON.stringify({
+            type: 'server:conversations_list',
+            conversations: this.ideWatcher.searchConversations((msg as any).query || '', targetWs?.path),
+          })
+        );
+        break;
+      }
+
       case 'client:switch_conversation': {
         if (this.ideWatcher.switchConversation(msg.conversationId)) {
           const history = this.ideWatcher.getHistory();
@@ -1078,6 +1147,34 @@ export class WsGateway {
             messages: history,
             conversationTitle: this.ideWatcher.getConversationTitle(),
           });
+          this.broadcast({
+            type: 'server:open_conversation',
+            conversationId: msg.conversationId,
+          });
+        }
+        break;
+      }
+
+      case 'client:resolve_file_diff': {
+        this.broadcast({
+          type: 'server:resolve_file_diff',
+          fileUri: (msg as any).fileUri,
+          action: (msg as any).action,
+        });
+        break;
+      }
+
+      case 'client:upstream_credentials': {
+        if ((msg as any).port && (msg as any).csrfToken) {
+          setDirectLanguageServerCredentials((msg as any).port, (msg as any).csrfToken);
+          getLiveAgentQuotas(true).then(quotas => {
+            if (quotas && quotas.length > 0) {
+              this.broadcast({
+                type: 'server:agent_quotas',
+                quotas,
+              });
+            }
+          }).catch(() => {});
         }
         break;
       }
@@ -1199,7 +1296,29 @@ export class WsGateway {
 
       case 'client:send_prompt': {
         const imgs = msg.images || (msg.imageBase64 ? [{ base64: msg.imageBase64, name: msg.imageName || 'photo.png' }] : []);
-        this.handleSendPrompt(msg.prompt, msg.workspaceId, imgs, msg.audio, msg.model);
+        this.handleSendPrompt(msg.prompt, msg.workspaceId, imgs, msg.audio, msg.model, msg.context);
+        break;
+      }
+
+      case 'client:set_model': {
+        if (msg.model) {
+          this.ideWatcher.setActiveModel(msg.model);
+          for (const ext of this.extensionClients) {
+            if (ext.readyState === WebSocket.OPEN) {
+              ext.send(JSON.stringify({ type: 'server:set_model', model: msg.model }));
+            }
+          }
+        }
+        break;
+      }
+
+      case 'client:refresh_quotas': {
+        getLiveAgentQuotas(true).then(quotas => {
+          this.broadcast({
+            type: 'server:agent_quotas',
+            quotas,
+          });
+        });
         break;
       }
 
@@ -1243,7 +1362,8 @@ export class WsGateway {
     workspaceId?: string,
     images?: { base64: string; name: string }[],
     audio?: AudioAttachment,
-    model?: string
+    model?: string,
+    context?: PromptContextChunk[]
   ): boolean {
     this.lastPhoneActivity = Date.now();
     const wsState = (workspaceId ? this.workspaceManager.getWorkspace(workspaceId) : null) || this.workspaceManager.listWorkspaces()[0];
@@ -1333,6 +1453,7 @@ export class WsGateway {
           images: imgs,
           audio: audio,
           model: model,
+          context: context,
         })
       );
       return true;

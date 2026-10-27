@@ -7,6 +7,18 @@ import { WebSocket } from 'ws';
 import { getRecentProjects, launchRecentProject } from '../session/recent-projects.js';
 import { closeProvider, restartProvider, getHostTelemetry } from '../provider/provider-lifecycle.js';
 import { getWorkspaceGitChanges } from '../hooks/ipc-server.js';
+import { getLiveAgentQuotas } from '../session/quota-tracker.js';
+import {
+  getGitStatus,
+  getGitDiff,
+  getGitBranches,
+  stageGitFile,
+  unstageGitFile,
+  discardGitFile,
+  commitGitChanges,
+  checkoutGitBranch,
+} from '../session/git-service.js';
+import { captureDesktopSnapshot } from './screen-capture.js';
 import type { WsGateway } from './ws-gateway.js';
 
 const _filename = typeof __filename !== 'undefined' ? __filename : fileURLToPath(import.meta.url);
@@ -33,8 +45,13 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     url === '/api/health' ||
     url === '/api/apk-status' ||
     url === '/api/version' ||
+    url === '/api/agent-quotas' ||
+    url === '/api/quotas' ||
     url === '/download/app.apk' ||
     url === '/app.apk' ||
+    url === '/download/kyber.vsix' ||
+    url === '/download/extension.vsix' ||
+    url === '/kyber.vsix' ||
     !url.startsWith('/api/');
 
   if (!isPublicEndpoint && !gateway.isRequestAuthorized(req, parsedUrl)) {
@@ -121,8 +138,226 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
   }
 
   if ((url === '/api/agent-quotas' || url === '/api/quotas') && req.method === 'GET') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, quotas: gateway.getIdeWatcher().getAgentQuotas(), timestamp: Date.now() }));
+    const force = parsedUrl.searchParams.get('force') === 'true';
+    getLiveAgentQuotas(force)
+      .then(liveQuotas => {
+        const quotas = liveQuotas.length > 0 ? liveQuotas : gateway.getIdeWatcher().getAgentQuotas();
+        if (force && quotas.length > 0) {
+          gateway.broadcast({
+            type: 'server:agent_quotas',
+            quotas,
+          });
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, quotas, timestamp: Date.now() }));
+      })
+      .catch(() => {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, quotas: gateway.getIdeWatcher().getAgentQuotas(), timestamp: Date.now() }));
+      });
+    return;
+  }
+
+  // Desktop Screen Snapshot Fallback (Transplant 3)
+  if ((url === '/api/host/screen.jpg' || url === '/api/screen.jpg') && req.method === 'GET') {
+    captureDesktopSnapshot()
+      .then(jpeg => {
+        if (!jpeg) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Desktop screen capture unavailable' }));
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'image/jpeg',
+          'Content-Length': jpeg.length,
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        });
+        res.end(jpeg);
+      })
+      .catch(err => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      });
+    return;
+  }
+
+  // --- Headless Git Working Tree API (Transplant 2) ---
+  if ((url === '/api/git/status' || url === '/api/workspace/git/status') && req.method === 'GET') {
+    try {
+      const targetWs = gateway.resolveWorkspace(parsedUrl.searchParams.get('workspaceId'));
+      getGitStatus(targetWs.path)
+        .then(status => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, workspaceId: targetWs.id, workspacePath: targetWs.path, status, changes: status.files }));
+        })
+        .catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if ((url === '/api/git/diff' || url === '/api/workspace/git/diff') && req.method === 'GET') {
+    try {
+      const targetWs = gateway.resolveWorkspace(parsedUrl.searchParams.get('workspaceId'));
+      const file = (parsedUrl.searchParams.get('file') || parsedUrl.searchParams.get('filePath') || parsedUrl.searchParams.get('path') || '').trim();
+      const staged = parsedUrl.searchParams.get('staged') === 'true';
+      getGitDiff(targetWs.path, file, staged)
+        .then(diffData => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ...diffData, filePath: file || null }));
+        })
+        .catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (url === '/api/git/branches' && req.method === 'GET') {
+    try {
+      const targetWs = gateway.resolveWorkspace(parsedUrl.searchParams.get('workspaceId'));
+      getGitBranches(targetWs.path)
+        .then(branches => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, ...branches }));
+        })
+        .catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message }));
+        });
+    } catch (err: any) {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: err.message }));
+    }
+    return;
+  }
+
+  if (url === '/api/git/stage' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { workspaceId, file } = JSON.parse(body);
+        const targetWs = gateway.resolveWorkspace(workspaceId);
+        stageGitFile(targetWs.path, file)
+          .then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          })
+          .catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (url === '/api/git/unstage' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { workspaceId, file } = JSON.parse(body);
+        const targetWs = gateway.resolveWorkspace(workspaceId);
+        unstageGitFile(targetWs.path, file)
+          .then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          })
+          .catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (url === '/api/git/discard' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { workspaceId, file, untracked } = JSON.parse(body);
+        const targetWs = gateway.resolveWorkspace(workspaceId);
+        discardGitFile(targetWs.path, file, untracked)
+          .then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          })
+          .catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (url === '/api/git/commit' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { workspaceId, message } = JSON.parse(body);
+        const targetWs = gateway.resolveWorkspace(workspaceId);
+        commitGitChanges(targetWs.path, message)
+          .then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          })
+          .catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
+  if (url === '/api/git/checkout' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { workspaceId, branch, create } = JSON.parse(body);
+        const targetWs = gateway.resolveWorkspace(workspaceId);
+        checkoutGitBranch(targetWs.path, branch, create)
+          .then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, ...result }));
+          })
+          .catch(err => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: err.message }));
+          });
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
     return;
   }
 
@@ -296,76 +531,7 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     return;
   }
 
-  // Live Workspace Git Status
-  if (url.startsWith('/api/workspace/git/status') || url.startsWith('/api/git/status')) {
-    try {
-      const parsed = new URL(url, 'http://localhost');
-      const targetWs = gateway.resolveWorkspace(parsed.searchParams.get('workspaceId'));
-      const cwd = targetWs.path;
-      const changes = getWorkspaceGitChanges(cwd);
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, workspacePath: cwd, changes }));
-    } catch (err: any) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
 
-  // Live Workspace Unified Git Diff Inspector
-  if (url.startsWith('/api/workspace/git/diff') || url.startsWith('/api/git/diff')) {
-    try {
-      const parsed = new URL(url, 'http://localhost');
-      const targetWs = gateway.resolveWorkspace(parsed.searchParams.get('workspaceId'));
-      const cwd = targetWs.path;
-      const rawFile = (parsed.searchParams.get('filePath') || parsed.searchParams.get('path') || parsed.searchParams.get('file') || '').trim();
-      let safeRel = '';
-      if (path.isAbsolute(rawFile)) {
-        safeRel = path.relative(cwd, rawFile).replace(/\\/g, '/');
-      } else {
-        safeRel = rawFile.replace(/^(\/|\\)+/, '').replace(/\\/g, '/');
-      }
-
-      let diff = '';
-      try {
-        if (safeRel) {
-          try {
-            diff = execFileSync('git', ['diff', 'HEAD', '-U3', '--', safeRel], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-          } catch {
-            diff = execFileSync('git', ['diff', '-U3', '--', safeRel], { cwd, encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-          }
-          if (!diff.trim()) {
-            const full = path.resolve(cwd, safeRel);
-            if (fs.existsSync(full) && !fs.statSync(full).isDirectory()) {
-              const content = fs.readFileSync(full, 'utf8');
-              const lines = content.split('\n');
-              diff = [
-                `--- /dev/null`,
-                `+++ b/${safeRel}`,
-                `@@ -0,0 +1,${lines.length} @@`,
-                ...lines.map(l => `+${l}`),
-              ].join('\n');
-            }
-          }
-        } else {
-          try {
-            diff = execSync('git diff HEAD -U3', { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-          } catch {
-            diff = execSync('git diff -U3', { cwd, encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
-          }
-        }
-      } catch (err: any) {
-        diff = `Failed to get diff: ${err.message}`;
-      }
-
-      res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, filePath: safeRel || null, diff }));
-    } catch (err: any) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message }));
-    }
-    return;
-  }
 
   // Live Workspace Active Editor Tabs
   if (url.startsWith('/api/workspace/tabs') || url.startsWith('/api/tabs')) {
@@ -832,11 +998,17 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
   // Serve compiled Android APK
   if (url === '/download/app.apk' || url === '/app.apk') {
     const candidateApkPaths = [
+      path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
       path.resolve(_dirname, '../apk/app-debug.apk'),
       path.resolve(_dirname, '../web/app-debug.apk'),
-      path.resolve(_dirname, '../../../../packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+      path.resolve(process.cwd(), 'packages/web/android/app/build/outputs/apk/debug/app-debug.apk'),
+      path.resolve(process.cwd(), 'packages/cli/dist/apk/app-debug.apk'),
     ];
-    const apkPath = candidateApkPaths.find(p => fs.existsSync(p));
+    const existingApks = candidateApkPaths
+      .filter(p => fs.existsSync(p))
+      .map(p => ({ path: p, mtime: fs.statSync(p).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+    const apkPath = existingApks[0]?.path;
     if (apkPath) {
       const stat = fs.statSync(apkPath);
       res.writeHead(200, {
@@ -849,6 +1021,30 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'APK is compiling or not found' }));
+      return;
+    }
+  }
+
+  // Serve compiled VS Code VSIX extension package
+  if (url === '/download/kyber.vsix' || url === '/download/extension.vsix' || url === '/kyber.vsix') {
+    const candidateVsixPaths = [
+      path.resolve(_dirname, '../../../../packages/vscode-extension/antigravity-companion-0.1.0.vsix'),
+      path.resolve(_dirname, '../extension/antigravity-companion-0.1.0.vsix'),
+      path.resolve(process.cwd(), 'packages/vscode-extension/antigravity-companion-0.1.0.vsix'),
+    ];
+    const vsixPath = candidateVsixPaths.find(p => fs.existsSync(p));
+    if (vsixPath) {
+      const stat = fs.statSync(vsixPath);
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': 'attachment; filename="kyber-0.1.0.vsix"',
+        'Content-Length': stat.size,
+      });
+      fs.createReadStream(vsixPath).pipe(res);
+      return;
+    } else {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'VSIX package not found' }));
       return;
     }
   }

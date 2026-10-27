@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Terminal,
   CheckCheck,
+  Check,
   X,
   ChevronDown,
   ChevronRight,
@@ -19,6 +20,7 @@ interface ApprovalCardsProps {
   pendingApprovals: ApprovalRequest[];
   onSendDecision: (requestId: string, decision: 'allow' | 'deny', option?: number, reason?: string) => void;
   onClearAll?: () => void;
+  onResolveFileDiff?: (fileUri: string, action: 'accept' | 'reject') => void;
 }
 
 interface QuestionItem {
@@ -134,14 +136,14 @@ const QuestionCard: React.FC<{
   return (
     <div
       style={{
-        background: '#1e1e1e',
+        background: '#181818',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '10px',
+        borderRadius: '12px',
         padding: '16px',
         display: 'flex',
         flexDirection: 'column',
         gap: '14px',
-        boxShadow: '0 8px 30px rgba(0, 0, 0, 0.6)',
+        boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7)',
       }}
     >
       {questionList.map((qItem, qIdx) => {
@@ -218,10 +220,10 @@ const QuestionCard: React.FC<{
                         gap: '12px',
                         padding: '9px 12px',
                         borderRadius: '6px',
-                        background: isSelected ? 'rgba(0, 120, 212, 0.12)' : '#232323',
-                        border: isSelected ? '1px solid #0078d4' : '1px solid rgba(255, 255, 255, 0.06)',
+                        background: isSelected ? '#1c1c1f' : '#141416',
+                        border: isSelected ? '1px solid rgba(255, 255, 255, 0.3)' : '1px solid rgba(255, 255, 255, 0.08)',
                         cursor: 'pointer',
-                        transition: 'all 0.15s ease',
+                        transition: 'background 120ms ease, border-color 120ms ease',
                       }}
                     >
                       {/* Number Badge */}
@@ -230,9 +232,9 @@ const QuestionCard: React.FC<{
                           minWidth: '20px',
                           height: '20px',
                           borderRadius: '4px',
-                          background: isSelected ? '#0078d4' : '#2c2c2c',
-                          border: isSelected ? '1px solid #0078d4' : '1px solid rgba(255, 255, 255, 0.08)',
-                          color: isSelected ? '#ffffff' : '#858585',
+                          background: isSelected ? '#ffffff' : '#222222',
+                          border: isSelected ? '1px solid #ffffff' : '1px solid rgba(255, 255, 255, 0.08)',
+                          color: isSelected ? '#000000' : '#858585',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -304,12 +306,16 @@ const QuestionCard: React.FC<{
           style={{
             background: 'transparent',
             border: 'none',
-            color: '#8c8c8c',
+            color: '#858585',
             fontSize: '13px',
             fontWeight: 500,
             cursor: 'pointer',
-            padding: '6px 10px',
-            borderRadius: '5px',
+            padding: '8px 14px',
+            borderRadius: '8px',
+            minHeight: '44px',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
           }}
         >
           Skip
@@ -318,22 +324,23 @@ const QuestionCard: React.FC<{
         <button
           onClick={handleSubmit}
           style={{
-            background: '#0078d4',
+            background: '#ffffff',
             border: 'none',
-            borderRadius: '6px',
-            color: '#ffffff',
+            borderRadius: '8px',
+            color: '#000000',
             fontSize: '13px',
-            fontWeight: 600,
-            padding: '7px 16px',
+            fontWeight: 700,
+            padding: '10px 20px',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
-            boxShadow: '0 2px 8px rgba(0, 120, 212, 0.3)',
+            minHeight: '44px',
+            boxShadow: '0 1px 4px rgba(0, 0, 0, 0.5)',
           }}
         >
           <span>Submit</span>
-          <CornerDownLeft size={13} strokeWidth={2.5} />
+          <CornerDownLeft size={13} strokeWidth={2.5} color="#000000" />
         </button>
       </div>
     </div>
@@ -341,70 +348,184 @@ const QuestionCard: React.FC<{
 };
 
 export const DiffViewer: React.FC<{ diff: string; maxHeight?: string }> = ({ diff, maxHeight = '260px' }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (containerRef.current) {
+      containerRef.current.scrollLeft = 0;
+      containerRef.current.scrollTop = 0;
+    }
+  }, [diff]);
+
   if (!diff) return null;
-  const lines = diff.split('\n');
+  const rawLines = diff.split('\n');
+
+  let oldLineCounter = 0;
+  let newLineCounter = 0;
+  let inHunk = false;
+
+  const parsedLines = rawLines.map((line, idx) => {
+    const isAdd = line.startsWith('+') && !line.startsWith('+++');
+    const isDel = line.startsWith('-') && !line.startsWith('---');
+    const isHunk = line.startsWith('@@');
+    const isHeader = line.startsWith('---') || line.startsWith('+++') || line.startsWith('diff ') || line.startsWith('index ');
+
+    let lineNumText = '';
+    let sign = ' ';
+    let content = line;
+
+    if (isHunk) {
+      inHunk = true;
+      const match = line.match(/@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+      if (match) {
+        oldLineCounter = parseInt(match[1], 10);
+        newLineCounter = parseInt(match[2], 10);
+      }
+      lineNumText = '...';
+      sign = '@';
+    } else if (isHeader) {
+      lineNumText = '';
+      sign = ' ';
+    } else if (isAdd) {
+      lineNumText = String(newLineCounter++);
+      sign = '+';
+      content = line.slice(1);
+    } else if (isDel) {
+      lineNumText = String(oldLineCounter++);
+      sign = '-';
+      content = line.slice(1);
+    } else if (inHunk && line.length > 0) {
+      lineNumText = String(newLineCounter++);
+      oldLineCounter++;
+      sign = ' ';
+      content = line.startsWith(' ') ? line.slice(1) : line;
+    }
+
+    return {
+      idx,
+      line,
+      content,
+      lineNumText,
+      sign,
+      isAdd,
+      isDel,
+      isHunk,
+      isHeader,
+    };
+  });
 
   return (
     <div
+      ref={containerRef}
       style={{
-        background: '#121213',
+        background: '#0d0d0e',
         border: '1px solid rgba(255, 255, 255, 0.08)',
-        borderRadius: '6px',
+        borderRadius: '8px',
         overflowX: 'auto',
         overflowY: 'auto',
         maxHeight,
         fontSize: '11px',
-        fontFamily: "'Geist Mono', Consolas, monospace",
+        fontFamily: "'Geist Mono', 'SF Mono', Consolas, monospace",
         lineHeight: '1.5',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
-      {lines.map((line, idx) => {
-        const isAdd = line.startsWith('+') && !line.startsWith('+++');
-        const isDel = line.startsWith('-') && !line.startsWith('---');
-        const isHunk = line.startsWith('@@');
-        const isHeader = line.startsWith('---') || line.startsWith('+++');
+      <div style={{ display: 'flex', flexDirection: 'column', width: 'max-content', minWidth: '100%' }}>
+        {parsedLines.map(item => {
+          let bg = 'transparent';
+          let textColor = '#d4d4d8';
+          let gutterBg = '#0d0d0e';
+          let signColor = '#636366';
 
-        let bg = 'transparent';
-        let color = '#d4d4d8';
-        if (isAdd) {
-          bg = 'rgba(34, 197, 94, 0.12)';
-          color = '#4ade80';
-        } else if (isDel) {
-          bg = 'rgba(239, 68, 68, 0.12)';
-          color = '#f87171';
-        } else if (isHunk) {
-          bg = 'rgba(59, 130, 246, 0.08)';
-          color = '#60a5fa';
-        } else if (isHeader) {
-          color = '#a1a1aa';
-        }
+          if (item.isAdd) {
+            bg = 'rgba(34, 197, 94, 0.12)';
+            textColor = '#4ade80';
+            gutterBg = '#122617';
+            signColor = '#22c55e';
+          } else if (item.isDel) {
+            bg = 'rgba(239, 68, 68, 0.12)';
+            textColor = '#f87171';
+            gutterBg = '#2b1414';
+            signColor = '#ef4444';
+          } else if (item.isHunk) {
+            bg = 'rgba(59, 130, 246, 0.08)';
+            textColor = '#60a5fa';
+            gutterBg = '#101d2a';
+            signColor = '#3b82f6';
+          } else if (item.isHeader) {
+            textColor = '#858585';
+            gutterBg = '#0d0d0e';
+          }
 
-        return (
-          <div
-            key={idx}
-            style={{
-              display: 'flex',
-              background: bg,
-              padding: '1px 8px',
-              whiteSpace: 'pre',
-            }}
-          >
-            <span
+          return (
+            <div
+              key={item.idx}
               style={{
-                width: '28px',
-                flexShrink: 0,
-                color: '#52525b',
-                userSelect: 'none',
-                textAlign: 'right',
-                paddingRight: '8px',
+                display: 'flex',
+                alignItems: 'stretch',
+                background: bg,
+                width: '100%',
+                minWidth: '100%',
+                boxSizing: 'border-box',
+                whiteSpace: 'pre',
               }}
             >
-              {idx + 1}
-            </span>
-            <span style={{ color }}>{line || ' '}</span>
-          </div>
-        );
-      })}
+              {/* Sticky Gutter: Line Number + Sign */}
+              <div
+                style={{
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 2,
+                  display: 'flex',
+                  alignItems: 'center',
+                  background: gutterBg,
+                  borderRight: '1px solid rgba(255, 255, 255, 0.07)',
+                  padding: '1px 6px 1px 4px',
+                  userSelect: 'none',
+                  flexShrink: 0,
+                  gap: '4px',
+                }}
+              >
+                <span
+                  style={{
+                    width: '32px',
+                    textAlign: 'right',
+                    color: '#636366',
+                    fontSize: '10px',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {item.lineNumText}
+                </span>
+                <span
+                  style={{
+                    width: '12px',
+                    textAlign: 'center',
+                    fontWeight: 700,
+                    color: signColor,
+                    fontSize: '11px',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {item.sign}
+                </span>
+              </div>
+
+              {/* Diff Line Content */}
+              <span
+                style={{
+                  flex: 1,
+                  color: textColor,
+                  padding: '1px 12px 1px 8px',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {item.content || ' '}
+              </span>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 };
@@ -413,6 +534,7 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
   pendingApprovals,
   onSendDecision,
   onClearAll,
+  onResolveFileDiff,
 }) => {
   const [selectedOptions, setSelectedOptions] = useState<Record<string, number>>({});
   const [option4Inputs, setOption4Inputs] = useState<Record<string, string>>({});
@@ -489,20 +611,20 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
           <div
             key={req.id}
             style={{
-              background: '#1e1e1e',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
-              borderRadius: '10px',
+              background: '#0a0a0c',
+              border: '1px solid #1f1f1f',
+              borderRadius: '12px',
               padding: '16px',
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
-              boxShadow: '0 8px 30px rgba(0, 0, 0, 0.6)',
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.7)',
             }}
           >
             {/* Header: Terminal icon, Title & Badge */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {targetFile ? <FileCode size={15} color="#007acc" /> : <Terminal size={15} color="#007acc" />}
+                {targetFile ? <FileCode size={15} color="#ffffff" /> : <Terminal size={15} color="#ffffff" />}
                 <span style={{ fontSize: '13px', fontWeight: 600, color: '#ffffff' }}>
                   {targetFile ? 'File Edit Request' : 'Tool Execution Request'}
                 </span>
@@ -610,7 +732,7 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                         cursor: 'pointer',
                       }}
                     >
-                      <GitBranch size={12} color="#007acc" />
+                      <GitBranch size={12} color="#ededed" />
                       <span>{isExpanded ? 'Hide Diff' : 'Inspect Diff'}</span>
                       {(ins > 0 || del > 0) && (
                         <span style={{ display: 'inline-flex', gap: '4px', fontSize: '10px', fontFamily: "'Geist Mono', monospace" }}>
@@ -661,9 +783,65 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                                 <FileTypeBadge name={c.file} />
                                 <span style={{ color: '#e4e4e7' }}>{c.file}</span>
                               </div>
-                              <div style={{ display: 'flex', gap: '6px' }}>
-                                <span style={{ color: '#4ade80' }}>+{c.insertions}</span>
-                                <span style={{ color: '#f87171' }}>-{c.deletions}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <span style={{ color: '#4ade80' }}>+{c.insertions}</span>
+                                  <span style={{ color: '#f87171' }}>-{c.deletions}</span>
+                                </div>
+                                {onResolveFileDiff && (
+                                  <div style={{ display: 'flex', gap: '4px', marginLeft: '4px' }}>
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        triggerHaptic(20);
+                                        onResolveFileDiff(c.file, 'accept');
+                                      }}
+                                      title="Accept edits in file"
+                                      style={{
+                                        background: 'rgba(34, 197, 94, 0.15)',
+                                        border: '1px solid rgba(34, 197, 94, 0.3)',
+                                        borderRadius: '4px',
+                                        color: '#4ade80',
+                                        padding: '2px 6px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '2px',
+                                        fontSize: '10px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      <Check size={11} />
+                                      <span>Accept</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        triggerHaptic(20);
+                                        onResolveFileDiff(c.file, 'reject');
+                                      }}
+                                      title="Reject edits in file"
+                                      style={{
+                                        background: 'rgba(239, 68, 68, 0.15)',
+                                        border: '1px solid rgba(239, 68, 68, 0.3)',
+                                        borderRadius: '4px',
+                                        color: '#f87171',
+                                        padding: '2px 6px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '2px',
+                                        fontSize: '10px',
+                                        fontWeight: 600,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      <X size={11} />
+                                      <span>Reject</span>
+                                    </button>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           ))}
@@ -705,25 +883,24 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                 }}
                 style={{
                   flex: 1,
-                  background: req.isPaused ? '#0078d4' : '#10b981',
+                  background: '#ffffff',
                   border: 'none',
-                  borderRadius: '6px',
-                  color: '#ffffff',
+                  borderRadius: '8px',
+                  color: '#000000',
                   fontSize: '13px',
-                  fontWeight: 600,
+                  fontWeight: 700,
                   padding: '10px 14px',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  boxShadow: req.isPaused
-                    ? '0 2px 8px rgba(0, 120, 212, 0.3)'
-                    : '0 2px 8px rgba(16, 185, 129, 0.3)',
-                  minHeight: '42px',
+                  boxShadow: '0 1px 4px rgba(0, 0, 0, 0.5)',
+                  minHeight: '44px',
+                  transition: 'transform 100ms cubic-bezier(0.2, 0, 0, 1), opacity 100ms ease',
                 }}
               >
-                {req.isPaused ? <Play size={15} fill="currentColor" /> : <CheckCheck size={16} />}
+                {req.isPaused ? <Play size={15} fill="#000000" color="#000000" /> : <CheckCheck size={16} color="#000000" />}
                 <span>{req.isPaused ? 'Resume & Allow' : 'Allow'}</span>
               </button>
 
@@ -734,9 +911,9 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                 }}
                 style={{
                   flex: 1,
-                  background: 'rgba(239, 68, 68, 0.12)',
-                  border: '1px solid rgba(239, 68, 68, 0.3)',
-                  borderRadius: '6px',
+                  background: '#141416',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  borderRadius: '8px',
                   color: '#f87171',
                   fontSize: '13px',
                   fontWeight: 600,
@@ -746,7 +923,8 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '6px',
-                  minHeight: '42px',
+                  minHeight: '44px',
+                  transition: 'transform 100ms cubic-bezier(0.2, 0, 0, 1), background 120ms ease',
                 }}
               >
                 <X size={16} />
@@ -853,13 +1031,13 @@ export const ApprovalCards = React.memo<ApprovalCardsProps>(({
                         }
                       }}
                       style={{
-                        background: '#0078d4',
-                        color: '#ffffff',
+                        background: '#ffffff',
+                        color: '#000000',
                         border: 'none',
                         borderRadius: '6px',
-                        padding: '6px 14px',
+                        padding: '8px 14px',
                         fontSize: '12px',
-                        fontWeight: 600,
+                        fontWeight: 700,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',

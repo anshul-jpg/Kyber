@@ -53,6 +53,7 @@ interface PromptDockProps {
   isQueued?: boolean;
   connected: boolean;
   companionMode: CompanionMode;
+  onToggleMode?: (mode: CompanionMode) => void;
   executionPolicy?: ExecutionPolicy;
   selectedModel: string;
   setSelectedModel: (model: string) => void;
@@ -83,6 +84,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
   isQueued,
   connected,
   companionMode,
+  onToggleMode,
   executionPolicy = 'force_ask',
   selectedModel,
   setSelectedModel,
@@ -291,11 +293,14 @@ export const PromptDock = React.memo<PromptDockProps>(({
     <footer
       style={{
         position: 'fixed',
-        bottom: 'calc(38px + env(safe-area-inset-bottom, 0px))',
+        bottom: 0,
         left: 0,
         right: 0,
         paddingLeft: 'max(14px, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(14px, env(safe-area-inset-right, 0px))',
+        paddingBottom: 'max(10px, env(safe-area-inset-bottom, 0px))',
+        paddingTop: '8px',
+        background: 'linear-gradient(180deg, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.75) 30%, #000000 85%)',
         boxSizing: 'border-box',
         zIndex: 35,
         pointerEvents: 'none',
@@ -324,11 +329,11 @@ export const PromptDock = React.memo<PromptDockProps>(({
         {/* Input Card Container */}
         <div
           style={{
-            background: '#1e1e1e',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            borderRadius: '14px',
+            background: '#0a0a0c',
+            border: '1px solid #1f1f1f',
+            borderRadius: '12px',
             padding: '8px 12px',
-            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.45)',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.8)',
             position: 'relative',
           }}
         >
@@ -339,10 +344,10 @@ export const PromptDock = React.memo<PromptDockProps>(({
                 position: 'absolute',
                 bottom: '54px',
                 left: '10px',
-                background: '#252526',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '8px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                background: '#181818',
+                border: '1px solid rgba(255, 255, 255, 0.08)',
+                borderRadius: '10px',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.7)',
                 width: '180px',
                 zIndex: 60,
                 padding: '6px 0',
@@ -441,53 +446,189 @@ export const PromptDock = React.memo<PromptDockProps>(({
             </div>
           )}
 
-          {/* Model Selector Dropdown */}
+          {/* Antigravity IDE 1:1 Model Selector Popover */}
           {showModelDropdown && (
             <div
               style={{
                 position: 'absolute',
                 bottom: '54px',
-                left: '42px',
-                background: '#252526',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: '8px',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                width: '210px',
-                zIndex: 60,
-                padding: '4px',
+                left: '12px',
+                background: '#1e1e1e',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+                borderRadius: '10px',
+                boxShadow: '0 12px 40px rgba(0,0,0,0.85)',
+                width: 'min(310px, calc(100vw - 24px))',
+                zIndex: 70,
+                padding: '8px',
+                boxSizing: 'border-box',
               }}
             >
-              {[
-                'Gemini 3.8 Flash High',
-                'Gemini 3.8 Flash Mid',
-                'Gemini 3.8 Flash Low',
-                'Claude Opus 4.5',
-                'Claude Sonnet 4.5',
-                'GPT-4.5',
-                'GPT OSS',
-              ].map(model => (
-                <button
-                  key={model}
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: '#858585',
+                  padding: '4px 6px 8px 6px',
+                  borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                  marginBottom: '6px',
+                  lineHeight: '1.35',
+                }}
+              >
+                Selected models are shared across members on your workspace.
+              </div>
+
+              {/* Model 1: Gemini 3.8 Flash with Low | Medium | High */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  background: selectedModel.startsWith('Gemini 3.8 Flash') ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                }}
+              >
+                <div
                   onClick={() => {
-                    setSelectedModel(model);
+                    const currentEffort = selectedModel.includes('Low') ? 'Low' : selectedModel.includes('High') ? 'High' : 'Medium';
+                    setSelectedModel(`Gemini 3.8 Flash ${currentEffort}`);
                     setShowModelDropdown(false);
                     triggerHaptic(20);
                   }}
                   style={{
-                    width: '100%',
-                    background: selectedModel === model ? '#333333' : 'transparent',
-                    border: 'none',
-                    borderRadius: '5px',
-                    padding: '8px 10px',
-                    color: selectedModel === model ? '#ffffff' : '#cccccc',
                     fontSize: '12px',
-                    textAlign: 'left',
+                    fontWeight: selectedModel.startsWith('Gemini 3.8 Flash') ? 600 : 400,
+                    color: selectedModel.startsWith('Gemini 3.8 Flash') ? '#ffffff' : '#cccccc',
                     cursor: 'pointer',
+                    flex: 1,
                   }}
                 >
-                  {model}
-                </button>
-              ))}
+                  Gemini 3.8 Flash
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    background: '#141414',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    borderRadius: '5px',
+                    padding: '2px',
+                    gap: '2px',
+                  }}
+                >
+                  {(['Low', 'Medium', 'High'] as const).map(effort => {
+                    const isSelected = selectedModel.startsWith('Gemini 3.8 Flash') && (
+                      effort === 'Medium' ? (!selectedModel.includes('Low') && !selectedModel.includes('High')) || selectedModel.includes('Medium')
+                      : selectedModel.includes(effort)
+                    );
+                    return (
+                      <button
+                        key={effort}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedModel(`Gemini 3.8 Flash ${effort}`);
+                          setShowModelDropdown(false);
+                          triggerHaptic(20);
+                        }}
+                        style={{
+                          background: isSelected ? '#333333' : 'transparent',
+                          color: isSelected ? '#ffffff' : '#858585',
+                          border: 'none',
+                          borderRadius: '4px',
+                          padding: '2px 6px',
+                          fontSize: '10.5px',
+                          fontWeight: isSelected ? 600 : 400,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {effort}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Model 2: Claude Sonnet 4.6 (Thinking) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedModel('Claude Sonnet 4.6 (Thinking)');
+                  setShowModelDropdown(false);
+                  triggerHaptic(20);
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: selectedModel === 'Claude Sonnet 4.6 (Thinking)' ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '7px 8px',
+                  color: selectedModel === 'Claude Sonnet 4.6 (Thinking)' ? '#ffffff' : '#cccccc',
+                  fontSize: '12px',
+                  fontWeight: selectedModel === 'Claude Sonnet 4.6 (Thinking)' ? 600 : 400,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>Claude Sonnet 4.6 (Thinking)</span>
+              </button>
+
+              {/* Model 3: Claude Opus 4.6 (Thinking) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedModel('Claude Opus 4.6 (Thinking)');
+                  setShowModelDropdown(false);
+                  triggerHaptic(20);
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: selectedModel === 'Claude Opus 4.6 (Thinking)' ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '7px 8px',
+                  color: selectedModel === 'Claude Opus 4.6 (Thinking)' ? '#ffffff' : '#cccccc',
+                  fontSize: '12px',
+                  fontWeight: selectedModel === 'Claude Opus 4.6 (Thinking)' ? 600 : 400,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>Claude Opus 4.6 (Thinking)</span>
+              </button>
+
+              {/* Model 4: GPT-OSS 120B (Medium) */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedModel('GPT-OSS 120B (Medium)');
+                  setShowModelDropdown(false);
+                  triggerHaptic(20);
+                }}
+                style={{
+                  width: '100%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  background: selectedModel === 'GPT-OSS 120B (Medium)' ? 'rgba(255, 255, 255, 0.06)' : 'transparent',
+                  border: 'none',
+                  borderRadius: '6px',
+                  padding: '7px 8px',
+                  color: selectedModel === 'GPT-OSS 120B (Medium)' ? '#ffffff' : '#cccccc',
+                  fontSize: '12px',
+                  fontWeight: selectedModel === 'GPT-OSS 120B (Medium)' ? 600 : 400,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                }}
+              >
+                <span>GPT-OSS 120B (Medium)</span>
+              </button>
             </div>
           )}
 
@@ -522,10 +663,10 @@ export const PromptDock = React.memo<PromptDockProps>(({
                       onClick={() => onForceSendPrompt(q)}
                       title="Abort current task and force send this prompt now"
                       style={{
-                        background: 'rgba(0, 122, 204, 0.16)',
-                        border: '1px solid rgba(0, 122, 204, 0.4)',
+                        background: 'rgba(255, 255, 255, 0.08)',
+                        border: '1px solid rgba(255, 255, 255, 0.2)',
                         borderRadius: '5px',
-                        color: '#38bdf8',
+                        color: '#ffffff',
                         padding: '2px 7px',
                         fontSize: '11px',
                         fontWeight: 600,
@@ -535,7 +676,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                         cursor: 'pointer',
                       }}
                     >
-                      <Zap size={10} color="#38bdf8" />
+                      <Zap size={10} color="#ffffff" />
                       <span>Force Send</span>
                     </button>
                     <button
@@ -595,7 +736,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     alignItems: 'center',
                     gap: '6px',
                     background: '#282828',
-                    border: '1px solid rgba(0, 122, 204, 0.4)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
                     borderRadius: '6px',
                     padding: '3px 8px',
                     color: '#e4e4e7',
@@ -604,7 +745,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     flexShrink: 0,
                   }}
                 >
-                  <Mic size={12} color="#38bdf8" />
+                  <Mic size={12} color="#ffffff" />
                   <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {attachedAudio.name || 'Voice Note'}
                   </span>
@@ -742,12 +883,12 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   onClick={stopAudioRecording}
                   title="Finish and attach voice note"
                   style={{
-                    background: '#007acc',
+                    background: '#ffffff',
                     border: 'none',
                     borderRadius: '5px',
-                    color: '#ffffff',
+                    color: '#000000',
                     fontSize: '11px',
-                    fontWeight: 600,
+                    fontWeight: 700,
                     padding: '3px 9px',
                     cursor: 'pointer',
                     display: 'flex',
@@ -796,7 +937,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     flexShrink: 0,
                   }}
                 >
-                  <Zap size={11} color="#38bdf8" />
+                  <Zap size={11} color="#ffffff" />
                   <span>{qa.label}</span>
                 </button>
               ))}
@@ -901,18 +1042,36 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   borderRadius: '4px',
                 }}
               >
-                <span>{selectedModel}</span>
+                <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {selectedModel.startsWith('Gemini 3.8 Flash')
+                    ? `Gemini 3.8 Flash (${selectedModel.replace('Gemini 3.8 Flash', '').trim() || 'Medium'})`
+                    : selectedModel}
+                </span>
                 <ChevronDown size={11} />
               </button>
 
               <div
+                onClick={() => {
+                  if (onToggleMode) {
+                    triggerHaptic(25);
+                    const isRemote = companionMode === 'remote' || companionMode === 'autonomous';
+                    onToggleMode(isRemote ? 'desk' : 'remote');
+                  }
+                }}
+                title={onToggleMode ? 'Tap to switch Desk / Remote companion mode' : 'Companion Mode'}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   gap: '5px',
                   fontSize: '11px',
                   color: '#858585',
-                  paddingLeft: '4px',
+                  padding: '3px 7px',
+                  borderRadius: '5px',
+                  cursor: onToggleMode ? 'pointer' : 'default',
+                  background: 'rgba(255, 255, 255, 0.03)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  userSelect: 'none',
+                  transition: 'background 120ms ease',
                 }}
               >
                 <span
@@ -922,12 +1081,12 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     borderRadius: '50%',
                     background: connected
                       ? companionMode === 'remote' || companionMode === 'autonomous'
-                        ? '#007acc'
+                        ? '#ffffff'
                         : '#10b981'
-                      : '#858585',
+                      : '#71717a',
                   }}
                 />
-                <span style={{ color: '#858585', fontWeight: 500 }}>
+                <span style={{ color: '#a1a1aa', fontWeight: 500 }}>
                   {connected
                     ? companionMode === 'remote' || companionMode === 'autonomous'
                       ? 'Remote'
@@ -940,7 +1099,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
             </div>
 
             {/* Right Sub-Controls */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               {isRecordingAudio && (
                 <button
                   type="button"
@@ -950,8 +1109,8 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     background: 'rgba(239, 68, 68, 0.15)',
                     border: '1px solid rgba(239, 68, 68, 0.3)',
                     color: '#f87171',
-                    width: '28px',
-                    height: '28px',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
                     display: 'flex',
                     alignItems: 'center',
@@ -968,20 +1127,20 @@ export const PromptDock = React.memo<PromptDockProps>(({
                 onClick={isRecordingAudio ? stopAudioRecording : startAudioRecording}
                 title={isRecordingAudio ? 'Finish & Attach Voice Note' : 'Record Voice Note'}
                 style={{
-                  background: isRecordingAudio ? '#007acc' : 'transparent',
+                  background: isRecordingAudio ? '#ffffff' : 'transparent',
                   border: 'none',
-                  color: isRecordingAudio ? '#ffffff' : '#858585',
-                  width: '28px',
-                  height: '28px',
+                  color: isRecordingAudio ? '#000000' : '#858585',
+                  width: '32px',
+                  height: '32px',
                   borderRadius: '50%',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   cursor: 'pointer',
-                  transition: 'background 0.15s ease',
+                  transition: 'background 120ms ease',
                 }}
               >
-                {isRecordingAudio ? <Check size={14} color="#ffffff" /> : <Mic size={15} />}
+                {isRecordingAudio ? <Check size={14} color="#000000" /> : <Mic size={15} />}
               </button>
 
               {/* Dynamic Action Button: Send/Queue when user typed, Stop when busy, disabled send when idle */}
@@ -998,20 +1157,21 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   }}
                   title={isBusy ? 'Queue Message' : 'Send Message'}
                   style={{
-                    background: '#007acc',
+                    background: '#ffffff',
                     border: 'none',
-                    color: '#ffffff',
-                    width: '28px',
-                    height: '28px',
+                    color: '#000000',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    transition: 'all 0.15s ease',
+                    transition: 'background 120ms ease, transform 100ms cubic-bezier(0.2, 0, 0, 1)',
+                    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.5)',
                   }}
                 >
-                  <ArrowRight size={14} />
+                  <ArrowRight size={15} color="#000000" strokeWidth={2.5} />
                 </button>
               ) : isBusy ? (
                 <button
@@ -1025,8 +1185,8 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     background: '#dc2626',
                     border: 'none',
                     color: '#ffffff',
-                    width: '28px',
-                    height: '28px',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
                     display: 'flex',
                     alignItems: 'center',
@@ -1035,7 +1195,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     transition: 'all 0.15s ease',
                   }}
                 >
-                  <Square size={10} fill="#ffffff" color="#ffffff" />
+                  <Square size={11} fill="#ffffff" color="#ffffff" />
                 </button>
               ) : (
                 <button
@@ -1043,11 +1203,11 @@ export const PromptDock = React.memo<PromptDockProps>(({
                   disabled
                   title="Send Message"
                   style={{
-                    background: '#282828',
+                    background: '#242426',
                     border: 'none',
-                    color: '#555555',
-                    width: '28px',
-                    height: '28px',
+                    color: '#52525b',
+                    width: '32px',
+                    height: '32px',
                     borderRadius: '50%',
                     display: 'flex',
                     alignItems: 'center',
@@ -1055,7 +1215,7 @@ export const PromptDock = React.memo<PromptDockProps>(({
                     cursor: 'default',
                   }}
                 >
-                  <ArrowRight size={14} />
+                  <ArrowRight size={15} />
                 </button>
               )}
             </div>

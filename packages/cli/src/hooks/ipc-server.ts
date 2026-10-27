@@ -317,7 +317,22 @@ export class HookIpcServer extends EventEmitter {
     clearTimeout(pending.timer);
     if (payload.decision === 'allow') {
       const cmd = pending.request.toolCall?.args?.CommandLine;
-      const overrides = cmd ? [`command(${cmd})`] : undefined;
+      let overrides: string[] | undefined;
+      if (cmd) {
+        const trimmed = cmd.trim();
+        const set = new Set([`command(${cmd})`, `command(${trimmed})`]);
+        const firstWord = trimmed.split(/\s+/)[0];
+        if (firstWord) {
+          set.add(`command(${firstWord})`);
+          set.add(firstWord);
+        }
+        const gitMatch = trimmed.match(/\b(git|gh)(\.exe)?\s+[^"'`;|&]+/i);
+        if (gitMatch) {
+          set.add(`command(${gitMatch[0].trim()})`);
+          set.add(gitMatch[0].trim());
+        }
+        overrides = Array.from(set);
+      }
       pending.resolve({
         decision: 'allow',
         ...(overrides ? { permissionOverrides: overrides } : {}),

@@ -192,7 +192,7 @@ export const IdeSystemDialogModal: React.FC<IdeSystemDialogModalProps> = ({
             {type === 'error' ? (
               <AlertCircle size={30} color="#f87171" />
             ) : type === 'info' ? (
-              <Info size={30} color="#0078d4" />
+              <Info size={30} color="#ffffff" />
             ) : (
               <AlertTriangle size={30} color="#cca700" />
             )}
@@ -294,7 +294,6 @@ export const IdeSystemDialogModal: React.FC<IdeSystemDialogModalProps> = ({
                   minHeight: '34px',
                   padding: '6px 16px',
                   fontSize: '13px',
-                  fontWeight: isPrimary ? 500 : 400,
                   borderRadius: '3px',
                   cursor: 'pointer',
                   border: isPrimary
@@ -303,9 +302,10 @@ export const IdeSystemDialogModal: React.FC<IdeSystemDialogModalProps> = ({
                     ? '1px solid rgba(255, 255, 255, 0.1)'
                     : '1px solid rgba(255, 255, 255, 0.08)',
                   backgroundColor: isPrimary
-                    ? '#0078d4'
-                    : '#3a3d41',
-                  color: isCancel ? '#cccccc' : '#ffffff',
+                    ? '#ffffff'
+                    : '#27272a',
+                  color: isPrimary ? '#000000' : isCancel ? '#cccccc' : '#ffffff',
+                  fontWeight: isPrimary ? 600 : 400,
                   outline: 'none',
                   display: 'inline-flex',
                   alignItems: 'center',

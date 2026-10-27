@@ -136,10 +136,20 @@ export interface HostTelemetry {
   isGlobalHookInstalled?: boolean;
 }
 
+export interface PromptContextChunk {
+  type: 'text' | 'file' | 'link';
+  text?: string;
+  uri?: string;
+  range?: { startLine: number; endLine: number; startLineNumber?: number; endLineNumber?: number };
+  url?: string;
+}
+
 // WebSocket message envelope
 export type WsClientMessage =
   | { type: 'client:hello'; deviceId: string; name?: string; workspacePath?: string; token?: string }
+  | { type: 'client:upstream_credentials'; port: number; csrfToken: string }
   | { type: 'client:respond_approval'; payload: ApprovalDecisionPayload }
+  | { type: 'client:resolve_file_diff'; fileUri: string; action: 'accept' | 'reject' }
   | {
       type: 'client:send_prompt';
       workspaceId: string;
@@ -148,6 +158,7 @@ export type WsClientMessage =
       imageName?: string;
       images?: { base64: string; name: string }[];
       audio?: AudioAttachment;
+      context?: PromptContextChunk[];
       model?: string;
     }
   | { type: 'client:switch_workspace'; workspaceId: string }
@@ -162,6 +173,7 @@ export type WsClientMessage =
   | { type: 'client:list_workspaces' }
   | { type: 'client:emergency_stop'; workspaceId?: string }
   | { type: 'client:list_conversations'; workspaceId?: string }
+  | { type: 'client:search_conversations'; query: string; workspaceId?: string }
   | { type: 'client:switch_conversation'; conversationId: string }
   | { type: 'client:get_agent_quotas' }
   | { type: 'client:clear_approvals' }
@@ -180,6 +192,8 @@ export type WsClientMessage =
       dialogType?: 'warning' | 'info' | 'error';
       detail?: string;
     }
+  | { type: 'client:set_model'; model: string }
+  | { type: 'client:refresh_quotas' }
   | { type: 'client:ping' };
 
 export interface ConversationSummary {
@@ -222,7 +236,10 @@ export type WsServerMessage =
   | { type: 'server:quick_actions_updated'; actions: QuickAction[] }
   | { type: 'server:device_count_updated'; count: number }
   | { type: 'server:run_quick_action'; command: string; label?: string }
-  | { type: 'server:forward_prompt'; prompt: string; workspaceId?: string; images?: { base64: string; name: string }[]; audio?: AudioAttachment; model?: string }
+  | { type: 'server:forward_prompt'; prompt: string; workspaceId?: string; images?: { base64: string; name: string }[]; audio?: AudioAttachment; model?: string; context?: PromptContextChunk[] }
+  | { type: 'server:resolve_file_diff'; fileUri: string; action: 'accept' | 'reject' }
+  | { type: 'server:open_conversation'; conversationId: string }
+  | { type: 'server:task_output'; stepIndex: number; logChunk: string; timestamp: number }
   | { type: 'server:emergency_stop'; workspaceId?: string }
   | { type: 'server:ide_status'; status: 'active' | 'dormant' }
   | { type: 'server:apk_status'; hasApk: boolean; apkBuildTime?: number; size?: number; version?: string }
@@ -236,6 +253,8 @@ export type WsServerMessage =
   | { type: 'server:open_workspace'; path: string }
   | { type: 'server:host_telemetry'; telemetry: HostTelemetry }
   | { type: 'server:active_workspace'; workspaceId: string }
+  | { type: 'server:model_updated'; model: string }
+  | { type: 'server:set_model'; model: string }
   | { type: 'server:pong'; timestamp?: number };
 
 export const DEFAULT_DAEMON_PORT = 4040;

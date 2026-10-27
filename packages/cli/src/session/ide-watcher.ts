@@ -5,6 +5,7 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 import { EventEmitter } from 'events';
 import { ChatMessage, AgentQuota, AudioAttachment, TerminalEntry } from '@agy-companion/protocol';
+import { getLiveAgentQuotas, getActiveIdeModel, setActiveIdeModel, quotaEventEmitter } from './quota-tracker.js';
 
 export class IdeTranscriptWatcher extends EventEmitter {
   private activeTranscriptPath: string | null = null;
@@ -16,10 +17,35 @@ export class IdeTranscriptWatcher extends EventEmitter {
   private watchTimer: NodeJS.Timeout | null = null;
   private messageHistory: ChatMessage[] = [];
   private terminalHistory: TerminalEntry[] = [];
+  private taskFileOffsets: Map<string, number> = new Map();
   private convWorkspaceCache: Map<string, string> = new Map();
+  private cachedLiveQuotas: AgentQuota[] = [];
+  private lastLiveQuotaFetch: number = 0;
+  private detectedModel: string = 'Gemini 3.8 Flash (High)';
+  private activeModelOverride: string | null = null;
 
   constructor() {
     super();
+    quotaEventEmitter.on('account_switched', () => {
+      getLiveAgentQuotas(true).then(quotas => {
+        if (quotas && quotas.length > 0) {
+          this.cachedLiveQuotas = quotas;
+          this.emit('quotas_updated', quotas);
+        }
+      }).catch(() => {});
+    });
+  }
+
+  public setActiveModel(model: string): void {
+    this.activeModelOverride = model;
+    this.detectedModel = model;
+    setActiveIdeModel(model);
+    this.emit('model_updated', model);
+    this.emit('quotas_updated', this.getAgentQuotas());
+  }
+
+  public getActiveModel(): string {
+    return this.activeModelOverride || getActiveIdeModel() || this.detectedModel;
   }
 
   public setTranscriptPath(transcriptPath: string | null): void {
@@ -31,6 +57,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
     this.lastThought = null;
     this.messageHistory = [];
     this.terminalHistory = [];
+    this.taskFileOffsets.clear();
     if (transcriptPath) {
       console.log(`[IdeWatcher] Now tracking IDE transcript: ${transcriptPath}`);
       this.readNewEntries();
@@ -177,38 +204,76 @@ export class IdeTranscriptWatcher extends EventEmitter {
     return false;
   }
 
+  public getAntigravityBrainDirs(): string[] {
+    const home = os.homedir();
+    const dirs = [
+      path.join(home, '.gemini', 'antigravity-ide', 'brain'),
+      path.join(home, '.gemini', 'antigravity', 'brain'),
+    ];
+    return dirs.filter(d => fs.existsSync(d));
+  }
+
+  public getAntigravityBaseDir(): string {
+    const home = os.homedir();
+    const ideBrain = path.join(home, '.gemini', 'antigravity-ide', 'brain');
+    const modernBrain = path.join(home, '.gemini', 'antigravity', 'brain');
+
+    const ideExists = fs.existsSync(ideBrain);
+    const modernExists = fs.existsSync(modernBrain);
+
+    if (ideExists && modernExists) {
+      try {
+        const ideTime = fs.statSync(ideBrain).mtimeMs;
+        const modernTime = fs.statSync(modernBrain).mtimeMs;
+        return modernTime > ideTime
+          ? path.join(home, '.gemini', 'antigravity')
+          : path.join(home, '.gemini', 'antigravity-ide');
+      } catch {
+        return path.join(home, '.gemini', 'antigravity-ide');
+      }
+    }
+    if (modernExists) return path.join(home, '.gemini', 'antigravity');
+    return path.join(home, '.gemini', 'antigravity-ide');
+  }
+
+  public getAntigravityBrainDir(): string {
+    return path.join(this.getAntigravityBaseDir(), 'brain');
+  }
+
   public autoDiscoverActiveConversation(workspaceDir?: string): string | null {
     try {
-      const home = os.homedir();
-      const brainDir = path.join(home, '.gemini', 'antigravity-ide', 'brain');
-      if (!fs.existsSync(brainDir)) return null;
+      const brainDirs = this.getAntigravityBrainDirs();
+      if (brainDirs.length === 0) return null;
 
       const targetDir = workspaceDir || this.currentWorkspaceDir;
       if (workspaceDir) {
         this.currentWorkspaceDir = workspaceDir;
       }
 
-      const entries = fs.readdirSync(brainDir, { withFileTypes: true });
-      const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.'));
+      const allCandidates: { name: string; path: string; mtime: number; brainDir: string }[] = [];
 
-      if (dirs.length === 0) return null;
-
-      // Sort by modified time of transcript descending (preferring untruncated transcript_full.jsonl)
-      const candidates = dirs
-        .map(d => {
-          const fullPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript_full.jsonl');
-          const compactPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
-          const transcriptPath = fs.existsSync(fullPath) ? fullPath : compactPath;
-          try {
-            if (!fs.existsSync(transcriptPath)) return null;
-            const stat = fs.statSync(transcriptPath);
-            return { name: d.name, path: transcriptPath, mtime: stat.mtimeMs };
-          } catch {
-            return null;
+      for (const brainDir of brainDirs) {
+        try {
+          const entries = fs.readdirSync(brainDir, { withFileTypes: true });
+          const dirs = entries.filter(e => e.isDirectory() && !e.name.startsWith('.'));
+          for (const d of dirs) {
+            const fullPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript_full.jsonl');
+            const compactPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
+            const transcriptPath = fs.existsSync(fullPath) ? fullPath : compactPath;
+            if (fs.existsSync(transcriptPath)) {
+              try {
+                const stat = fs.statSync(transcriptPath);
+                allCandidates.push({ name: d.name, path: transcriptPath, mtime: stat.mtimeMs, brainDir });
+              } catch {}
+            }
           }
-        })
-        .filter((d): d is { name: string; path: string; mtime: number } => d !== null)
-        .sort((a, b) => b.mtime - a.mtime);
+        } catch {}
+      }
+
+      if (allCandidates.length === 0) return null;
+
+      // Sort by modified time of transcript descending
+      const candidates = allCandidates.sort((a, b) => b.mtime - a.mtime);
 
       let best: { name: string; path: string; mtime: number } | null = null;
 
@@ -265,6 +330,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
     // Poll file every 250ms for low-latency live streaming
     this.watchTimer = setInterval(() => {
       this.readNewEntries();
+      this.readNewTaskLogs();
 
       // Every 30 ticks (~7.5s), auto-discover if Antigravity started or switched conversation
       this.autoDiscoverTicks++;
@@ -317,6 +383,55 @@ export class IdeTranscriptWatcher extends EventEmitter {
     }
   }
 
+  private readNewTaskLogs(): void {
+    if (!this.activeTranscriptPath) return;
+    try {
+      const logsDir = path.dirname(this.activeTranscriptPath);
+      const systemGenDir = path.dirname(logsDir);
+      const tasksDir = path.join(systemGenDir, 'tasks');
+      if (!fs.existsSync(tasksDir)) return;
+
+      const entries = fs.readdirSync(tasksDir).filter(f => f.startsWith('task-') && f.endsWith('.log'));
+      for (const file of entries) {
+        const fullPath = path.join(tasksDir, file);
+        const stat = fs.statSync(fullPath);
+        const lastOffset = this.taskFileOffsets.get(fullPath) ?? 0;
+        if (stat.size <= lastOffset) continue;
+
+        const fd = fs.openSync(fullPath, 'r');
+        const bytesToRead = stat.size - lastOffset;
+        const buf = Buffer.alloc(bytesToRead);
+        fs.readSync(fd, buf, 0, bytesToRead, lastOffset);
+        fs.closeSync(fd);
+        this.taskFileOffsets.set(fullPath, stat.size);
+
+        const chunk = buf.toString('utf8');
+        if (!chunk.trim()) continue;
+
+        const stepMatch = file.match(/task-(\d+)\.log/);
+        const stepIndex = stepMatch ? parseInt(stepMatch[1], 10) : 0;
+        const now = Date.now();
+
+        this.emit('task_output', {
+          stepIndex,
+          logChunk: chunk,
+          timestamp: now,
+        });
+
+        const entry: TerminalEntry = {
+          id: `task_${stepIndex}_${now}`,
+          command: `Task #${stepIndex}`,
+          output: chunk,
+          timestamp: now,
+        };
+        this.recordTerminalEntry(entry);
+        this.emit('terminal_output', entry);
+      }
+    } catch {
+      // Ignore transient errors while task files are written
+    }
+  }
+
   private recordMessage(msg: ChatMessage, emitLive: boolean = true): void {
     if (!this.messageHistory.some(m => m.id === msg.id)) {
       this.messageHistory.push(msg);
@@ -329,6 +444,23 @@ export class IdeTranscriptWatcher extends EventEmitter {
   private handleTranscriptEntry(entry: any, emitLive: boolean = true): void {
     // 1. User Message in IDE
     if (entry.type === 'USER_INPUT' && entry.content) {
+      if (entry.content.includes('Model Selection')) {
+        const modelMatch = entry.content.match(/Model Selection`?\s+from\s+.*?\s+to\s+([A-Za-z0-9\s\.\(\)\-]+?)\./i);
+        if (modelMatch && modelMatch[1]) {
+          const newModel = modelMatch[1].trim();
+          this.detectedModel = newModel;
+          this.activeModelOverride = newModel;
+          setActiveIdeModel(newModel);
+          if (emitLive) {
+            this.emit('model_updated', newModel);
+            this.emit('quotas_updated', this.getAgentQuotas());
+          }
+        }
+        if (entry.content.includes('<USER_SETTINGS_CHANGE>')) {
+          return;
+        }
+      }
+
       let cleanContent = entry.content;
       // Strip metadata tags like <USER_REQUEST>...</USER_REQUEST>
       const match = entry.content.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
@@ -475,24 +607,30 @@ export class IdeTranscriptWatcher extends EventEmitter {
   }
 
   public getRecentConversations(workspaceDir?: string): { id: string; title: string; timestamp: number }[] {
-    const home = os.homedir();
-    const brainDir = path.join(home, '.gemini', 'antigravity-ide', 'brain');
-    if (!fs.existsSync(brainDir)) return [];
+    const brainDirs = this.getAntigravityBrainDirs();
+    if (brainDirs.length === 0) return [];
 
     const targetDir = workspaceDir || this.currentWorkspaceDir;
     const mappings = targetDir ? this.getWorkspaceStorageMappings(targetDir) : null;
 
     try {
-      const dirs = fs.readdirSync(brainDir, { withFileTypes: true });
-      const convs = dirs
-        .filter(d => d.isDirectory())
-        .map(d => {
-          const transcriptPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
-          if (!fs.existsSync(transcriptPath)) return null;
+      const convMap = new Map<string, { id: string; title: string; timestamp: number }>();
+      for (const brainDir of brainDirs) {
+        let dirs: fs.Dirent[] = [];
+        try {
+          dirs = fs.readdirSync(brainDir, { withFileTypes: true });
+        } catch { continue; }
+        for (const d of dirs) {
+          if (!d.isDirectory() || d.name.startsWith('.')) continue;
+          if (convMap.has(d.name)) continue;
+          const fullPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript_full.jsonl');
+          const compactPath = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
+          const transcriptPath = fs.existsSync(fullPath) ? fullPath : compactPath;
+          if (!fs.existsSync(transcriptPath)) continue;
 
           if (targetDir && mappings) {
             if (!this.isConversationForWorkspace(d.name, transcriptPath, targetDir, mappings)) {
-              return null;
+              continue;
             }
           }
           const stat = fs.statSync(transcriptPath);
@@ -523,30 +661,37 @@ export class IdeTranscriptWatcher extends EventEmitter {
               } catch {}
             }
           } catch {}
-          return {
+          convMap.set(d.name, {
             id: d.name,
             title,
             timestamp: stat.mtimeMs,
-          };
-        })
-        .filter((c): c is { id: string; title: string; timestamp: number } => c !== null)
+          });
+        }
+      }
+      return Array.from(convMap.values())
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 20);
-
-      return convs;
     } catch {
       return [];
     }
   }
 
+  public searchConversations(query: string, workspaceDir?: string): { id: string; title: string; timestamp: number }[] {
+    const list = this.getRecentConversations(workspaceDir);
+    if (!query || !query.trim()) return list;
+    const q = query.trim().toLowerCase();
+    return list.filter(c => c.title.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+  }
+
   public switchConversation(convId: string): boolean {
-    const home = os.homedir();
-    const fullPath = path.join(home, '.gemini', 'antigravity-ide', 'brain', convId, '.system_generated', 'logs', 'transcript_full.jsonl');
-    const compactPath = path.join(home, '.gemini', 'antigravity-ide', 'brain', convId, '.system_generated', 'logs', 'transcript.jsonl');
-    const transcriptPath = fs.existsSync(fullPath) ? fullPath : compactPath;
-    if (fs.existsSync(transcriptPath)) {
-      this.setTranscriptPath(transcriptPath);
-      return true;
+    for (const brainDir of this.getAntigravityBrainDirs()) {
+      const fullPath = path.join(brainDir, convId, '.system_generated', 'logs', 'transcript_full.jsonl');
+      const compactPath = path.join(brainDir, convId, '.system_generated', 'logs', 'transcript.jsonl');
+      const transcriptPath = fs.existsSync(fullPath) ? fullPath : compactPath;
+      if (fs.existsSync(transcriptPath)) {
+        this.setTranscriptPath(transcriptPath);
+        return true;
+      }
     }
     return false;
   }
@@ -565,15 +710,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
     images?: { base64: string; name: string }[] | { base64?: string; name?: string }
   ): string[] {
     const convId = this.getActiveConversationId() || 'global_uploads';
-    const home = os.homedir();
-    const userUploadedDir = path.join(
-      home,
-      '.gemini',
-      'antigravity-ide',
-      'brain',
-      convId,
-      '.user_uploaded'
-    );
+    const userUploadedDir = path.join(this.getConversationDir(convId), '.user_uploaded');
 
     const savedPaths: string[] = [];
     try {
@@ -605,15 +742,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
   public saveUploadedAudio(audio?: AudioAttachment): string | null {
     if (!audio || !audio.base64) return null;
     const convId = this.getActiveConversationId() || 'global_uploads';
-    const home = os.homedir();
-    const userUploadedDir = path.join(
-      home,
-      '.gemini',
-      'antigravity-ide',
-      'brain',
-      convId,
-      '.user_uploaded'
-    );
+    const userUploadedDir = path.join(this.getConversationDir(convId), '.user_uploaded');
 
     try {
       if (!fs.existsSync(userUploadedDir)) {
@@ -651,23 +780,15 @@ export class IdeTranscriptWatcher extends EventEmitter {
     const convId = targetConvId || this.getActiveConversationId();
     if (!convId) return { success: false, imageSavedPaths: [] };
 
-    const home = os.homedir();
+    const convDir = this.getConversationDir(convId);
     const messagesDir = path.join(
-      home,
-      '.gemini',
-      'antigravity-ide',
-      'brain',
-      convId,
+      convDir,
       '.system_generated',
       'messages'
     );
     const undeliveredDir = path.join(messagesDir, 'undelivered');
     const userUploadedDir = path.join(
-      home,
-      '.gemini',
-      'antigravity-ide',
-      'brain',
-      convId,
+      convDir,
       '.user_uploaded'
     );
 
@@ -761,17 +882,44 @@ export class IdeTranscriptWatcher extends EventEmitter {
 
   public getAgentQuotas(): AgentQuota[] {
     const now = Date.now();
-    let detectedModel = 'Gemini 3.8 Flash (High)';
+    let detectedModel = this.activeModelOverride || getActiveIdeModel() || this.detectedModel;
 
-    // Scan beginning of transcript for active model selection
+    // Scan tail of transcript for latest active model selection
     if (this.activeTranscriptPath && fs.existsSync(this.activeTranscriptPath)) {
       try {
-        const sample = fs.readFileSync(this.activeTranscriptPath, 'utf8').substring(0, 10000);
-        const match = sample.match(/Model Selection`?\s+from\s+.*?\s+to\s+([A-Za-z0-9\s\.\(\)\-]+?)\./i);
-        if (match && match[1]) {
-          detectedModel = match[1].trim();
+        const stats = fs.statSync(this.activeTranscriptPath);
+        const readLen = Math.min(stats.size, 50000);
+        const buf = Buffer.alloc(readLen);
+        const fd = fs.openSync(this.activeTranscriptPath, 'r');
+        fs.readSync(fd, buf, 0, readLen, Math.max(0, stats.size - readLen));
+        fs.closeSync(fd);
+        const sample = buf.toString('utf8');
+        const matches = [...sample.matchAll(/Model Selection`?\s+from\s+.*?\s+to\s+([A-Za-z0-9\s\.\(\)\-]+?)\./gi)];
+        if (matches.length > 0) {
+          detectedModel = matches[matches.length - 1][1].trim();
+          this.detectedModel = detectedModel;
         }
       } catch {}
+    }
+
+    if (now - this.lastLiveQuotaFetch > 6000) {
+      this.lastLiveQuotaFetch = now;
+      getLiveAgentQuotas()
+        .then(quotas => {
+          if (quotas && quotas.length > 0) {
+            this.cachedLiveQuotas = quotas;
+          }
+        })
+        .catch(() => {});
+    }
+
+    if (this.cachedLiveQuotas.length > 0) {
+      return this.cachedLiveQuotas.map(q => ({
+        ...q,
+        isActive:
+          q.name.toLowerCase().includes(detectedModel.toLowerCase()) ||
+          detectedModel.toLowerCase().includes(q.name.toLowerCase()),
+      }));
     }
 
     const userTurns = this.messageHistory.filter(m => m.role === 'user').length;
@@ -807,7 +955,7 @@ export class IdeTranscriptWatcher extends EventEmitter {
     return [
       {
         id: 'gemini-3.8-flash',
-        name: 'Gemini 3.8 Flash (High)',
+        name: 'Gemini 3.8 Flash',
         provider: 'Google',
         badge: 'Default Agent',
         isActive: isFlashActive || (!isProActive && !isClaudeActive && !isGptActive),
@@ -820,24 +968,10 @@ export class IdeTranscriptWatcher extends EventEmitter {
         status: flashUsed / 150 > 0.8 ? 'exhausted' : flashUsed / 150 > 0.5 ? 'moderate' : 'optimal',
       },
       {
-        id: 'gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
-        provider: 'Google',
-        badge: 'Deep Reasoning',
-        isActive: isProActive,
-        usedPercent: Math.round((proUsed / 50) * 100),
-        usedUnits: proUsed,
-        totalUnits: 50,
-        unitLabel: 'reqs',
-        resetTimestamp: proReset,
-        resetWindowText: '5h rolling window',
-        status: proUsed / 50 > 0.8 ? 'exhausted' : proUsed / 50 > 0.5 ? 'moderate' : 'optimal',
-      },
-      {
-        id: 'claude-3.5-sonnet',
-        name: 'Claude 3.5 Sonnet',
+        id: 'claude-sonnet-4.6',
+        name: 'Claude Sonnet 4.6 (Thinking)',
         provider: 'Anthropic',
-        badge: 'High Craft',
+        badge: 'Deep Reasoning',
         isActive: isClaudeActive,
         usedPercent: Math.round((claudeUsed / 45) * 100),
         usedUnits: claudeUsed,
@@ -848,8 +982,22 @@ export class IdeTranscriptWatcher extends EventEmitter {
         status: claudeUsed / 45 > 0.8 ? 'exhausted' : claudeUsed / 45 > 0.5 ? 'moderate' : 'optimal',
       },
       {
-        id: 'gpt-4o',
-        name: 'GPT-4o (Codex)',
+        id: 'claude-opus-4.6',
+        name: 'Claude Opus 4.6 (Thinking)',
+        provider: 'Anthropic',
+        badge: 'High Craft',
+        isActive: isProActive,
+        usedPercent: Math.round((proUsed / 30) * 100),
+        usedUnits: proUsed,
+        totalUnits: 30,
+        unitLabel: 'reqs',
+        resetTimestamp: proReset,
+        resetWindowText: '5h rolling window',
+        status: proUsed / 30 > 0.8 ? 'exhausted' : proUsed / 30 > 0.5 ? 'moderate' : 'optimal',
+      },
+      {
+        id: 'gpt-oss-120b',
+        name: 'GPT-OSS 120B (Medium)',
         provider: 'OpenAI',
         badge: 'Universal',
         isActive: isGptActive,
@@ -864,12 +1012,21 @@ export class IdeTranscriptWatcher extends EventEmitter {
     ];
   }
 
-  public getConversationDir(): string | null {
+  public getConversationDir(convId?: string): string {
+    if (convId) {
+      for (const b of this.getAntigravityBrainDirs()) {
+        const p = path.join(b, convId);
+        if (fs.existsSync(p)) return p;
+      }
+      return path.join(this.getAntigravityBrainDir(), convId);
+    }
     if (!this.activeTranscriptPath) {
       this.autoDiscoverActiveConversation();
     }
-    if (!this.activeTranscriptPath) return null;
-    return path.resolve(path.dirname(this.activeTranscriptPath), '..', '..');
+    if (this.activeTranscriptPath) {
+      return path.resolve(path.dirname(this.activeTranscriptPath), '..', '..');
+    }
+    return this.getAntigravityBrainDir();
   }
 
   public getSessionArtifacts(): Array<{ name: string; relPath: string; size: number; mtime: number; type: 'markdown' | 'image' | 'code' | 'other' }> {
