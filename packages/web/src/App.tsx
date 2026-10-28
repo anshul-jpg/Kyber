@@ -16,6 +16,7 @@ import {
   RecentProject,
   TerminalEntry,
   HostTelemetry,
+  PromptContextChunk,
 } from '@agy-companion/protocol';
 import {
   dispatchApprovalNotification,
@@ -25,17 +26,17 @@ import {
   sanitizeNotificationText,
 } from './utils/notifications';
 
-import { triggerHaptic } from './components/CommonUI';
+import { triggerHaptic, ErrorBoundary } from './components/CommonUI';
 import { Header } from './components/Header';
 import { WorkspaceView } from './components/WorkspaceView';
 import { HomeScreen } from './components/HomeScreen';
 import { ChatFeed } from './components/ChatFeed';
 import { ApprovalCards } from './components/ApprovalCards';
 import { PromptDock, AttachedAudio } from './components/PromptDock';
-import { BottomStatusBar } from './components/BottomStatusBar';
 import { HistoryDrawer } from './components/HistoryDrawer';
 import { ActionModals } from './components/ActionModals';
 import { SettingsModal } from './components/SettingsModal';
+import { QuotasStrip } from './components/QuotasStrip';
 import { IdeSystemDialogModal, isIdeSystemDialog } from './components/IdeSystemDialogModal';
 import { useCompanionSocket } from './hooks/useCompanionSocket';
 import { getApiBaseUrl } from './utils/api';
@@ -127,7 +128,7 @@ export default function App() {
   const [isQueued, setIsQueued] = useState<boolean>(false);
   const [attachedImages, setAttachedImages] = useState<{ preview: string; name: string; base64: string }[]>([]);
   const [attachedAudio, setAttachedAudio] = useState<AttachedAudio | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>('Gemini 3.8 Flash High');
+  const [selectedModel, setSelectedModel] = useState<string>('Gemini 3.8 Flash Medium');
 
   // Modals & Panels
   const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
@@ -212,6 +213,8 @@ export default function App() {
   pendingApprovalsRef.current = pendingApprovals;
   const lastThinkingNotifyRef = useRef<number>(0);
 
+  const [stagedContext, setStagedContext] = useState<PromptContextChunk[]>([]);
+
   // Companion Socket Hook
   const {
     connected,
@@ -220,6 +223,8 @@ export default function App() {
     reconnectTick,
     setReconnectTick,
     sendClientMessage,
+    resolveFileDiff,
+    searchConversations,
   } = useCompanionSocket({
     host,
     port,
@@ -246,8 +251,22 @@ export default function App() {
     setCurrentThinking,
     setIsQueued,
     setActiveSessionBackup,
+    setSelectedModel,
     getAuthHeaders,
   });
+
+  // Keep selectedModel synchronized with active quota from Language Server
+  useEffect(() => {
+    const activeQuota = agentQuotas.find(q => q.isActive);
+    if (activeQuota && activeQuota.name && activeQuota.name !== selectedModel) {
+      setSelectedModel(activeQuota.name);
+    }
+  }, [agentQuotas]);
+
+  const handleSelectModel = (model: string) => {
+    setSelectedModel(model);
+    sendClientMessage({ type: 'client:set_model', model });
+  };
 
   // Thinking Elapsed Timer Effect
   useEffect(() => {
@@ -276,6 +295,27 @@ export default function App() {
       }
     }
   }, [chatMessages, pendingApprovals]);
+
+  // Periodic Live Quota Fetcher
+  useEffect(() => {
+    const fetchQuotas = () => {
+      try {
+        const httpBase = getApiBaseUrl(host, port);
+        fetch(`${httpBase}/api/quotas`, { headers: getAuthHeaders() })
+          .then(res => res.json())
+          .then(data => {
+            if (data?.quotas && Array.isArray(data.quotas) && data.quotas.length > 0) {
+              setAgentQuotas(data.quotas);
+            }
+          })
+          .catch(() => {});
+      } catch {}
+    };
+
+    fetchQuotas();
+    const interval = setInterval(fetchQuotas, 30000);
+    return () => clearInterval(interval);
+  }, [host, port, getAuthHeaders]);
 
   // Listen for native APK update download progress
   useEffect(() => {
@@ -637,8 +677,12 @@ export default function App() {
       prompt: textToSend,
       images: imagesPayload.length > 0 ? imagesPayload : undefined,
       audio: audioPayload,
+      context: stagedContext.length > 0 ? stagedContext : undefined,
       model: selectedModel,
     };
+    if (stagedContext.length > 0) {
+      setStagedContext([]);
+    }
 
     let sentViaWs = false;
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -982,8 +1026,8 @@ export default function App() {
         flexDirection: 'column',
         height: '100%',
         width: '100%',
-        background: '#141414',
-        color: '#cccccc',
+        background: '#000000',
+        color: '#ededed',
         position: 'relative',
         overflow: 'hidden',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -1049,8 +1093,10 @@ export default function App() {
         hostTelemetry={hostTelemetry}
         tailscaleIp={tailscaleIp}
         onCloseIde={handleCloseIde}
-        onRestartIde={handleRestartIde}
       />
+
+      {/* Real-Time Agent Quotas Strip */}
+      <QuotasStrip quotas={agentQuotas} />
 
 
       {/* 401 Unauthorized Re-Pairing Banner */}
@@ -1100,11 +1146,11 @@ export default function App() {
               }}
               style={{
                 flex: 1,
-                background: '#007acc',
+                background: '#ffffff',
                 border: 'none',
                 borderRadius: '6px',
                 padding: '8px 12px',
-                color: '#ffffff',
+                color: '#000000',
                 fontSize: '12px',
                 fontWeight: 600,
                 cursor: 'pointer',
@@ -1144,7 +1190,7 @@ export default function App() {
           paddingLeft: 'max(14px, env(safe-area-inset-left, 0px))',
           paddingRight: 'max(14px, env(safe-area-inset-right, 0px))',
           paddingTop: '12px',
-          paddingBottom: '220px',
+          paddingBottom: activeSegment === 'chat' ? 'calc(110px + env(safe-area-inset-bottom, 0px))' : 'calc(24px + env(safe-area-inset-bottom, 0px))',
           display: 'flex',
           flexDirection: 'column',
           gap: '14px',
@@ -1159,28 +1205,31 @@ export default function App() {
                   pendingApprovals={pendingApprovals}
                   onSendDecision={sendDecision}
                   onClearAll={handleClearApprovals}
+                  onResolveFileDiff={resolveFileDiff}
                 />
               </div>
             )}
-            <WorkspaceView
-            tabs={editorTabs}
-            activeWorkspaceId={activeWorkspaceId}
-            activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
-            onSelectTab={handleSelectTab}
-            onInspectTab={handleInspectTab}
-            modifiedFiles={modifiedFilesList}
-            host={host}
-            port={port}
-            getAuthHeaders={getAuthHeaders}
-            recentProjects={recentProjects}
-            onLaunchRecentProject={handleLaunchRecentProject}
-            onCloseTab={handleCloseTab}
-            onCloseAllTabs={handleCloseAllTabs}
-            onPreviewFile={(file) => {
-              setSelectedTabFile(file);
-              setActiveActionModal('explorer');
-            }}
-          />
+            <ErrorBoundary fallbackTitle="Error loading workspace view">
+              <WorkspaceView
+                tabs={editorTabs}
+                activeWorkspaceId={activeWorkspaceId}
+                activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+                onSelectTab={handleSelectTab}
+                onInspectTab={handleInspectTab}
+                modifiedFiles={modifiedFilesList}
+                host={host}
+                port={port}
+                getAuthHeaders={getAuthHeaders}
+                recentProjects={recentProjects}
+                onLaunchRecentProject={handleLaunchRecentProject}
+                onCloseTab={handleCloseTab}
+                onCloseAllTabs={handleCloseAllTabs}
+                onPreviewFile={(file) => {
+                  setSelectedTabFile(file);
+                  setActiveActionModal('explorer');
+                }}
+              />
+            </ErrorBoundary>
         </>
       ) : chatMessages.length === 0 && pendingApprovals.length === 0 ? (
           <HomeScreen
@@ -1213,6 +1262,8 @@ export default function App() {
                 wsRef.current.send(JSON.stringify({ type: 'client:switch_workspace', workspaceId: activeWorkspaceId }));
               }
             }}
+            ideStatus={ideStatus}
+            onLaunchIde={() => handleRestartIde()}
           />
         ) : (
           <>
@@ -1229,12 +1280,15 @@ export default function App() {
               thinkingElapsed={thinkingElapsed}
               isQueued={isQueued}
               onDismissQueued={() => setIsQueued(false)}
+              ideStatus={ideStatus}
+              onLaunchIde={() => handleRestartIde()}
             />
 
             <ApprovalCards
               pendingApprovals={pendingApprovals}
               onSendDecision={sendDecision}
               onClearAll={handleClearApprovals}
+              onResolveFileDiff={resolveFileDiff}
             />
 
             <div ref={chatBottomRef} style={{ height: '1px' }} />
@@ -1242,43 +1296,41 @@ export default function App() {
         )}
       </main>
 
-      {/* Persistent Bottom Prompt Dock */}
-      <PromptDock
-        promptText={promptText}
-        setPromptText={setPromptText}
-        isStreaming={isStreaming}
-        currentThinking={currentThinking}
-        isQueued={isQueued}
-        connected={connected}
-        companionMode={companionMode}
-        executionPolicy={executionPolicy}
-        selectedModel={selectedModel}
-        setSelectedModel={setSelectedModel}
-        attachedImages={attachedImages}
-        setAttachedImages={setAttachedImages}
-        attachedAudio={attachedAudio}
-        setAttachedAudio={setAttachedAudio}
-        queuedPrompts={queuedPrompts}
-        setQueuedPrompts={setQueuedPrompts}
-        onForceSendPrompt={handleForceSendQueued}
-        onCancelQueuedPrompt={handleCancelQueuedPrompt}
-        onEditQueuedPrompt={handleEditQueuedPrompt}
-        quickActions={quickActions}
-        onRunQuickAction={handleRunQuickAction}
-        onSendPrompt={sendPrompt}
-        onQueuePrompt={handleQueuePrompt}
-        onEmergencyStop={handleEmergencyStop}
-        fileInputRef={fileInputRef}
-        textareaRef={textareaRef}
-        onFileChange={handleFileChange}
-      />
+      {/* Persistent Bottom Prompt Dock - only in Chat view */}
+      {activeSegment === 'chat' && (
+        <PromptDock
+          promptText={promptText}
+          setPromptText={setPromptText}
+          isStreaming={isStreaming}
+          currentThinking={currentThinking}
+          isQueued={isQueued}
+          connected={connected}
+          companionMode={companionMode}
+          onToggleMode={m => toggleMode(m)}
+          executionPolicy={executionPolicy}
+          selectedModel={selectedModel}
+          setSelectedModel={handleSelectModel}
+          attachedImages={attachedImages}
+          setAttachedImages={setAttachedImages}
+          attachedAudio={attachedAudio}
+          setAttachedAudio={setAttachedAudio}
+          queuedPrompts={queuedPrompts}
+          setQueuedPrompts={setQueuedPrompts}
+          onForceSendPrompt={handleForceSendQueued}
+          onCancelQueuedPrompt={handleCancelQueuedPrompt}
+          onEditQueuedPrompt={handleEditQueuedPrompt}
+          quickActions={quickActions}
+          onRunQuickAction={handleRunQuickAction}
+          onSendPrompt={sendPrompt}
+          onQueuePrompt={handleQueuePrompt}
+          onEmergencyStop={handleEmergencyStop}
+          fileInputRef={fileInputRef}
+          textareaRef={textareaRef}
+          onFileChange={handleFileChange}
+        />
+      )}
 
-      {/* Global Fixed Bottom Status Bar */}
-      <BottomStatusBar
-        companionMode={companionMode}
-        onToggleMode={m => toggleMode(m)}
-        onOpenSettings={() => setShowSettingsModal(true)}
-      />
+
 
       {/* History Slide-over Drawer */}
       <HistoryDrawer
@@ -1286,26 +1338,34 @@ export default function App() {
         onClose={() => setShowHistoryDrawer(false)}
         conversations={conversations}
         onSelectConversation={switchConversation}
+        onSearchConversations={searchConversations}
       />
 
       {/* Multi-Domain Action Bottom Sheets / Modals */}
-      <ActionModals
-        activeActionModal={activeActionModal}
-        onClose={() => {
-          setActiveActionModal(null);
-          setSelectedTabFile(null);
-        }}
-        expandedFolders={expandedFolders}
-        onToggleFolder={toggleFolder}
-        modifiedFilesList={modifiedFilesList}
-        terminalLogs={sessionStats.terminalLogs}
-        terminalEntries={terminalEntries}
-        activeWorkspaceId={activeWorkspaceId}
-        activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
-        host={host}
-        port={port}
-        initialOpenFile={selectedTabFile}
-      />
+      <ErrorBoundary fallbackTitle="Error loading action modal">
+        <ActionModals
+          activeActionModal={activeActionModal}
+          onClose={() => {
+            setActiveActionModal(null);
+            setSelectedTabFile(null);
+          }}
+          expandedFolders={expandedFolders}
+          onToggleFolder={toggleFolder}
+          modifiedFilesList={modifiedFilesList}
+          terminalLogs={sessionStats.terminalLogs}
+          terminalEntries={terminalEntries}
+          activeWorkspaceId={activeWorkspaceId}
+          activeWorkspaceName={workspaces.find(w => w.id === activeWorkspaceId)?.name}
+          host={host}
+          port={port}
+          initialOpenFile={selectedTabFile}
+          onQuoteToChat={quote => {
+            setStagedContext(prev => [...prev, { type: 'file', uri: quote.uri, range: quote.range }]);
+            setPromptText(prev => (prev ? `${prev} @${quote.title}` : `Review: @${quote.title} `));
+            setActiveActionModal(null);
+          }}
+        />
+      </ErrorBoundary>
 
       {/* 1:1 Antigravity Desktop-Fidelity System Modal Dialog (e.g. Save Unsaved Changes) */}
       {activeDialog && (
@@ -1329,6 +1389,9 @@ export default function App() {
         companionMode={companionMode}
         onUpdateCompanionMode={m => toggleMode(m)}
         agentQuotas={agentQuotas}
+        onQuotasUpdated={setAgentQuotas}
+        selectedModel={selectedModel}
+        onSelectModel={handleSelectModel}
         hostTelemetry={hostTelemetry}
         onCloseIde={handleCloseIde}
         onRestartIde={handleRestartIde}
