@@ -123,6 +123,14 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
         case 'openSettings':
           vscode.commands.executeCommand('workbench.action.openSettings', 'antigravityCompanion');
           break;
+        case 'enableStartupService':
+          this.daemonManager.enableStartupService();
+          this.updateWebview();
+          break;
+        case 'disableStartupService':
+          this.daemonManager.disableStartupService();
+          this.updateWebview();
+          break;
         case 'restartExtensionHost':
           await vscode.commands.executeCommand('workbench.action.restartExtensionHost');
           break;
@@ -166,7 +174,7 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
   }
 
   private getInitialLoadingHtml(): string {
-    return `<!DOCTYPE html><html><body style="background:#181818;color:#cccccc;font-family:-apple-system,BlinkMacSystemFont,'Inter',sans-serif;padding:16px;font-size:11.5px;"><div style="display:flex;align-items:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 100 100" fill="none"><polygon points="48.5,18 22,58 48.5,98" fill="#ffffff"/><polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa"/></svg><strong style="color:#ffffff;">Antigravity Companion</strong></div><p style="margin-top:10px;color:#858585;">Connecting to workspace daemon...</p></body></html>`;
+    return `<!DOCTYPE html><html><body style="background:#0d0d0e;color:#cccccc;font-family:'Geist Mono',Consolas,monospace;padding:16px;font-size:11.5px;"><div style="display:flex;align-items:center;gap:8px;"><svg width="18" height="18" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="18" y="16" width="13" height="68" rx="2.5" fill="#ffffff"/><path d="M52 16 L31 50 L52 84 H39 L22 50 L39 16 H52 Z" fill="#ffffff"/><path d="M82 16 L61 50 L82 84 H69 L52 50 L69 16 H82 Z" fill="#ffffff" opacity="0.8"/></svg><strong style="color:#ffffff;font-size:14px;letter-spacing:-0.02em;">kyber.</strong></div><p style="margin-top:10px;color:#71717a;font-size:11px;">Connecting to workspace daemon...</p></body></html>`;
   }
 
   public async updateWebview(): Promise<void> {
@@ -199,6 +207,7 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
 
     // Generate high-craft dark mode QR Code SVG
     let qrSvg = '';
+    let apkQrSvg = '';
     if (currentEndpoint && currentEndpoint.url) {
       try {
         qrSvg = await QRCode.toString(currentEndpoint.url, {
@@ -209,8 +218,17 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
             light: '#141414',
           },
         });
+        apkQrSvg = await QRCode.toString(`${currentEndpoint.url}/download/app.apk`, {
+          type: 'svg',
+          margin: 1,
+          color: {
+            dark: '#cccccc',
+            light: '#141414',
+          },
+        });
       } catch {
         qrSvg = '<div style="color:#858585;font-size:10px;text-align:center;">QR generation failed</div>';
+        apkQrSvg = '<div style="color:#858585;font-size:10px;text-align:center;">APK QR generation failed</div>';
       }
     }
 
@@ -228,7 +246,9 @@ export class CompanionSidebarProvider implements vscode.WebviewViewProvider {
       isGlobalHookInstalled: this.hookManager.isInstalledGlobally(),
       activeEndpointType: this.activeEndpointType,
       executionPolicy: this.daemonManager.getExecutionPolicy(),
+      isStartupServiceEnabled: this.daemonManager.isStartupServiceEnabled(),
       qrSvg,
+      apkQrSvg,
     });
   }
 }

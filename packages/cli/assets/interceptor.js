@@ -114,19 +114,49 @@ async function main() {
     const toolName = hookContext.toolCall?.name || '';
     const cmd = hookContext.toolCall?.args?.CommandLine || '';
 
+    function getPermissionOverrides(toolCall) {
+      if (!toolCall || toolCall.name !== 'run_command') return undefined;
+      const cmd = toolCall.args?.CommandLine;
+      if (!cmd) return undefined;
+      const trimmed = cmd.trim();
+      const overrides = new Set([
+        `command(${cmd})`,
+        `command(${trimmed})`,
+      ]);
+      const firstWord = trimmed.split(/\s+/)[0];
+      if (firstWord) {
+        overrides.add(`command(${firstWord})`);
+        overrides.add(firstWord);
+      }
+      const gitMatch = trimmed.match(/\b(git|gh)(\.exe)?\s+[^"'`;|&]+/i);
+      if (gitMatch) {
+        overrides.add(`command(${gitMatch[0].trim()})`);
+        overrides.add(gitMatch[0].trim());
+      }
+      return Array.from(overrides);
+    }
+
     // Safe read tools that never require user approval
     const SAFE_READ_TOOLS = new Set([
+      'read_file',
       'view_file',
       'list_dir',
       'grep_search',
       'read_url_content',
       'read_resource',
       'list_resources',
+      'search_web',
+      'search_marketplace',
+      'list_plugin_accounts',
       'schedule',
       'manage_task',
     ]);
     if (SAFE_READ_TOOLS.has(toolName)) {
-      sendDecisionAndExit({ decision: 'allow' }, `safe-read-tool:${toolName}`);
+      const overrides = getPermissionOverrides(hookContext.toolCall);
+      sendDecisionAndExit({
+        decision: 'allow',
+        ...(overrides ? { permissionOverrides: overrides } : {}),
+      }, `safe-read-tool:${toolName}`);
       return;
     }
 
@@ -158,7 +188,11 @@ async function main() {
     const isAlwaysAllow = policy === 'always_proceed' || mode === 'auto' || mode === 'autonomous';
 
     if (isAlwaysAllow && toolName !== 'ask_question') {
-      sendDecisionAndExit({ decision: 'allow' }, `always-allow:policy=${policy}:mode=${mode}`);
+      const overrides = getPermissionOverrides(hookContext.toolCall);
+      sendDecisionAndExit({
+        decision: 'allow',
+        ...(overrides ? { permissionOverrides: overrides } : {}),
+      }, `always-allow:policy=${policy}:mode=${mode}`);
       return;
     }
 
@@ -183,7 +217,11 @@ async function main() {
     // REMOTE MODE: Prompt appears ONLY on Phone Companion (ZERO desktop popups)
     const result = await postToDaemon(hookContext);
     if (result && result.decision === 'allow') {
-      sendDecisionAndExit({ decision: 'allow' }, 'remote-approved');
+      const overrides = result.permissionOverrides || getPermissionOverrides(hookContext.toolCall);
+      sendDecisionAndExit({
+        decision: 'allow',
+        ...(overrides ? { permissionOverrides: overrides } : {}),
+      }, 'remote-approved');
       return;
     }
 

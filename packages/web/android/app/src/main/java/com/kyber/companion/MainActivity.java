@@ -12,15 +12,19 @@ import android.os.Environment;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
 import android.webkit.JavascriptInterface;
+import android.webkit.PermissionRequest;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.List;
 
 public class MainActivity extends BridgeActivity {
     private static MainActivity instance;
     public static final int REQUEST_CODE_SPEECH_INPUT = 2002;
+    public static final int REQUEST_CODE_CAMERA_PERMISSION = 1003;
 
     public static MainActivity getInstance() {
         return instance;
@@ -33,12 +37,43 @@ public class MainActivity extends BridgeActivity {
         startPersistentCompanionService();
         if (getBridge() != null && getBridge().getWebView() != null) {
             getBridge().getWebView().addJavascriptInterface(this, "AndroidHost");
+            // Ensure WebView grants camera/microphone permissions requested by HTML5 getUserMedia
+            getBridge().getWebView().setWebChromeClient(new BridgeWebChromeClient(getBridge()) {
+                @Override
+                public void onPermissionRequest(final PermissionRequest request) {
+                    runOnUiThread(() -> {
+                        try {
+                            request.grant(request.getResources());
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                }
+            });
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            List<String> neededPermissions = new ArrayList<>();
             if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{android.Manifest.permission.RECORD_AUDIO}, 1001);
+                neededPermissions.add(android.Manifest.permission.RECORD_AUDIO);
+            }
+            if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                neededPermissions.add(android.Manifest.permission.CAMERA);
+            }
+            if (!neededPermissions.isEmpty()) {
+                requestPermissions(neededPermissions.toArray(new String[0]), 1001);
             }
         }
+    }
+
+    @JavascriptInterface
+    public void requestCameraPermission() {
+        runOnUiThread(() -> {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                if (checkSelfPermission(android.Manifest.permission.CAMERA) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{android.Manifest.permission.CAMERA}, REQUEST_CODE_CAMERA_PERMISSION);
+                }
+            }
+        });
     }
 
     @JavascriptInterface

@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="24" height="24" fill="none">
-  <!-- Left Staggered Facet -->
-  <polygon points="48.5,18 22,58 48.5,98" fill="currentColor" />
-  <!-- Right Elevated Facet -->
-  <polygon points="51.5,2 78,42 51.5,82" fill="currentColor" opacity="0.65" />
+  <!-- Monolithic Vertical Spine -->
+  <rect x="18" y="16" width="13" height="68" rx="2.5" fill="currentColor" />
+  <!-- Primary Internal Chevron Blade -->
+  <path d="M52 16 L31 50 L52 84 H39 L22 50 L39 16 H52 Z" fill="currentColor" />
+  <!-- Forward Auxiliary Blade -->
+  <path d="M82 16 L61 50 L82 84 H69 L52 50 L69 16 H82 Z" fill="currentColor" opacity="0.75" />
 </svg>

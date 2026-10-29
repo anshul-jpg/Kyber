@@ -17,6 +17,7 @@ import {
   QuickAction,
   EditorTab,
   ExecutionPolicy,
+  PromptContextChunk,
 } from '@agy-companion/protocol';
 import { DaemonStatus, PairingEndpoint, ConnectedDevice, CompanionMode, MeshStatus, LogLine } from './types';
 
@@ -40,7 +41,7 @@ export class DaemonManager extends EventEmitter {
   private cloudflareUrl: string | null = null;
   private lastActivityTimestamp: number = Date.now();
   private userExplicitlyStopped: boolean = false;
-  private pendingDialogResolvers: Map<string, (choice: { decision: string; option?: number }) => void> = new Map();
+  private pendingDialogResolvers: Map<string, (choice: { decision: string; option?: number; reason?: string }) => void> = new Map();
 
   constructor(private context: vscode.ExtensionContext) {
     super();
@@ -141,6 +142,54 @@ export class DaemonManager extends EventEmitter {
     return !!token && token.length > 0;
   }
 
+  // --- 24/7 Windows Background Autostart Service ---
+  public getStartupVbsPath(): string {
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    return path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'agy-companion.vbs');
+  }
+
+  public isStartupServiceEnabled(): boolean {
+    if (process.platform !== 'win32') return false;
+    return fs.existsSync(this.getStartupVbsPath());
+  }
+
+  public enableStartupService(): boolean {
+    if (process.platform !== 'win32') return false;
+    try {
+      const cliPath = this.getCliExecutablePath();
+      if (!cliPath) return false;
+      const vbsPath = this.getStartupVbsPath();
+      const dir = path.dirname(vbsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const content = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run "node """ & "${cliPath.replace(/\\/g, '\\\\')}" & """", 0, False\r\n`;
+      fs.writeFileSync(vbsPath, content, 'utf8');
+      this.addLogLine('[24/7 Service] Registered Windows background startup script.', 'info');
+      vscode.window.showInformationMessage('24/7 Background Service enabled! Companion will run silently on Windows boot.');
+      this.emit('status_changed', this.status);
+      return true;
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to enable startup service: ${e?.message || e}`);
+      return false;
+    }
+  }
+
+  public disableStartupService(): boolean {
+    if (process.platform !== 'win32') return false;
+    try {
+      const vbsPath = this.getStartupVbsPath();
+      if (fs.existsSync(vbsPath)) {
+        fs.unlinkSync(vbsPath);
+      }
+      this.addLogLine('[24/7 Service] Removed Windows startup script.', 'info');
+      vscode.window.showInformationMessage('24/7 Background Service disabled.');
+      this.emit('status_changed', this.status);
+      return true;
+    } catch (e: any) {
+      vscode.window.showErrorMessage(`Failed to disable startup service: ${e?.message || e}`);
+      return false;
+    }
+  }
+
   public async probeRunningDaemon(port?: number): Promise<boolean> {
     const config = vscode.workspace.getConfiguration('antigravityCompanion');
     const targetPort = port || config.get<number>('gatewayPort', DEFAULT_DAEMON_PORT);
@@ -209,17 +258,43 @@ export class DaemonManager extends EventEmitter {
 
     const interfaces = os.networkInterfaces();
     let localIp: string | null = null;
-    let tsIp: string | null = tailscaleIp || null;
+    let tsIp: string | null = (tailscaleIp && tailscaleIp.startsWith('100.')) ? tailscaleIp : null;
 
     for (const name of Object.keys(interfaces)) {
       for (const iface of interfaces[name] || []) {
         if (iface.family === 'IPv4' && !iface.internal) {
-          if (name.toLowerCase().includes('tailscale') || iface.address.startsWith('100.')) {
+          if (iface.address.startsWith('169.254.')) {
+            continue;
+          }
+          if (iface.address.startsWith('100.')) {
             tsIp = iface.address;
-          } else if (!localIp && !iface.address.startsWith('169.254')) {
-            localIp = iface.address;
+          } else if (!localIp) {
+            if (name.toLowerCase().includes('wi-fi') || name.toLowerCase().includes('ethernet')) {
+              localIp = iface.address;
+            }
           }
         }
+      }
+    }
+
+    if (!tsIp) {
+      try {
+        const out = execSync('tailscale ip -4', { encoding: 'utf8', timeout: 1500, windowsHide: true }).trim();
+        if (out && out.startsWith('100.')) {
+          tsIp = out;
+        }
+      } catch {}
+    }
+
+    if (!localIp) {
+      for (const name of Object.keys(interfaces)) {
+        for (const iface of interfaces[name] || []) {
+          if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('169.254.') && !iface.address.startsWith('100.')) {
+            localIp = iface.address;
+            break;
+          }
+        }
+        if (localIp) break;
       }
     }
 
@@ -460,11 +535,27 @@ export class DaemonManager extends EventEmitter {
     try {
       fs.writeFileSync(globalPolicy, policy, 'utf8');
     } catch {}
+
+    // Lock global Antigravity IDE User settings.json
+    try {
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      const settingsPath = path.join(appData, 'Antigravity IDE', 'User', 'settings.json');
+      if (fs.existsSync(settingsPath)) {
+        const raw = fs.readFileSync(settingsPath, 'utf8');
+        const settings = JSON.parse(raw);
+        const targetVal = policy === 'always_proceed' ? 'always-proceed' : 'always-ask';
+        settings['antigravity.toolExecutionPolicy'] = targetVal;
+        settings['antigravity.autoExecutionPolicy'] = targetVal;
+        settings['antigravity.artifactReviewMode'] = targetVal;
+        fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+      }
+    } catch {}
+
     if (this.wsClient && this.wsClient.readyState === WebSocket.OPEN) {
       const msg: any = { type: 'client:set_execution_policy', policy };
       this.wsClient.send(JSON.stringify(msg));
     }
-    this.addLogLine(`[Policy Switch] Execution policy set to: ${policy}`, 'info');
+    this.addLogLine(`[Policy Switch] Execution policy locked globally to: ${policy}`, 'info');
     this.emit('status_changed', this.status);
   }
 
@@ -587,7 +678,7 @@ export class DaemonManager extends EventEmitter {
 
   private resolveNodeExecutable(): string {
     try {
-      execSync('node -v', { stdio: 'ignore' });
+      execSync('node -v', { stdio: 'ignore', windowsHide: true });
       return 'node';
     } catch {
       return process.execPath;
@@ -603,9 +694,10 @@ export class DaemonManager extends EventEmitter {
       localDistDaemon,
       workspaceRoot ? path.join(workspaceRoot, 'packages', 'cli', 'dist', 'bin', 'agy-companion.js') : '',
       path.resolve(__dirname, '..', '..', 'cli', 'dist', 'bin', 'agy-companion.js'),
-      path.resolve(__dirname, '..', 'cli', 'dist', 'bin', 'agy-companion.js'),
       path.resolve(os.homedir(), '.gemini', 'antigravity-ide', 'companion', 'bin', 'agy-companion.js'),
       path.resolve(os.homedir(), '.gemini', 'antigravity-ide', 'companion', 'agy-companion.js'),
+      path.resolve(os.homedir(), '.gemini', 'antigravity', 'companion', 'bin', 'agy-companion.js'),
+      path.resolve(os.homedir(), '.gemini', 'antigravity', 'companion', 'agy-companion.js'),
     ];
 
     for (const p of candidatePaths) {
@@ -614,40 +706,77 @@ export class DaemonManager extends EventEmitter {
     return null;
   }
 
+  private getGeminiAntigravityBase(): string {
+    const home = os.homedir();
+    const ideBrain = path.join(home, '.gemini', 'antigravity-ide', 'brain');
+    const modernBrain = path.join(home, '.gemini', 'antigravity', 'brain');
+
+    if (fs.existsSync(ideBrain) && fs.existsSync(modernBrain)) {
+      try {
+        const ideTime = fs.statSync(ideBrain).mtimeMs;
+        const modernTime = fs.statSync(modernBrain).mtimeMs;
+        return modernTime > ideTime
+          ? path.join(home, '.gemini', 'antigravity')
+          : path.join(home, '.gemini', 'antigravity-ide');
+      } catch {
+        return path.join(home, '.gemini', 'antigravity-ide');
+      }
+    }
+    if (fs.existsSync(modernBrain)) return path.join(home, '.gemini', 'antigravity');
+    return path.join(home, '.gemini', 'antigravity-ide');
+  }
+
   private findActiveConversationId(): string | null {
     try {
       const home = os.homedir();
-      // 1. Check sqlite conversations dir for currently active .db-wal / .db
-      const convDir = path.join(home, '.gemini', 'antigravity-ide', 'conversations');
-      if (fs.existsSync(convDir)) {
-        const files = fs.readdirSync(convDir);
-        const walFiles = files.filter(f => f.endsWith('.db-wal'));
-        if (walFiles.length > 0) {
-          walFiles.sort((a, b) => {
-            return fs.statSync(path.join(convDir, b)).mtimeMs - fs.statSync(path.join(convDir, a)).mtimeMs;
-          });
-          return walFiles[0].replace('.db-wal', '');
+      const baseDirs = [
+        path.join(home, '.gemini', 'antigravity-ide'),
+        path.join(home, '.gemini', 'antigravity'),
+      ];
+      let bestCandidate: { id: string; mtime: number } | null = null;
+      for (const base of baseDirs) {
+        if (!fs.existsSync(base)) continue;
+        const convDir = path.join(base, 'conversations');
+        if (fs.existsSync(convDir)) {
+          const files = fs.readdirSync(convDir);
+          const walFiles = files.filter(f => f.endsWith('.db-wal'));
+          for (const f of walFiles) {
+            try {
+              const mtime = fs.statSync(path.join(convDir, f)).mtimeMs;
+              if (!bestCandidate || mtime > bestCandidate.mtime) {
+                bestCandidate = { id: f.replace('.db-wal', ''), mtime };
+              }
+            } catch {}
+          }
+        }
+        const brainDir = path.join(base, 'brain');
+        if (fs.existsSync(brainDir)) {
+          const dirs = fs.readdirSync(brainDir, { withFileTypes: true })
+            .filter(d => d.isDirectory() && !d.name.startsWith('.'));
+          for (const d of dirs) {
+            const transcript = path.join(brainDir, d.name, '.system_generated', 'logs', 'transcript.jsonl');
+            if (fs.existsSync(transcript)) {
+              try {
+                const mtime = fs.statSync(transcript).mtimeMs;
+                if (!bestCandidate || mtime > bestCandidate.mtime) {
+                  bestCandidate = { id: d.name, mtime };
+                }
+              } catch {}
+            }
+          }
         }
       }
-      // 2. Check brain dir
-      const brainDir = path.join(home, '.gemini', 'antigravity-ide', 'brain');
-      if (fs.existsSync(brainDir)) {
-        const dirs = fs.readdirSync(brainDir, { withFileTypes: true })
-          .filter(d => d.isDirectory() && !d.name.startsWith('.'));
-        dirs.sort((a, b) => {
-          const aPath = path.join(brainDir, a.name);
-          const bPath = path.join(brainDir, b.name);
-          return fs.statSync(bPath).mtimeMs - fs.statSync(aPath).mtimeMs;
-        });
-        if (dirs.length > 0) {
-          return dirs[0].name;
-        }
-      }
+      return bestCandidate ? bestCandidate.id : null;
     } catch {}
     return null;
   }
 
-  public async injectPromptIntoIde(prompt: string, images?: { base64: string; name: string }[], model?: string): Promise<void> {
+  public async injectPromptIntoIde(
+    prompt: string,
+    images?: { base64: string; name: string }[],
+    model?: string,
+    context?: PromptContextChunk[]
+  ): Promise<void> {
     this.recordActivity();
     let finalPrompt = prompt;
     if (model && !model.toLowerCase().includes('flash')) {
@@ -656,21 +785,103 @@ export class DaemonManager extends EventEmitter {
     }
     this.addLogLine(`[Prompt Received from Phone]: "${finalPrompt.slice(0, 50)}..."`, 'info');
 
-    // 1. Primary: Native Antigravity IDE Agent Panel submission (verified in IDE binary)
+    // Ensure chat panel is revealed and focused without throwing if an individual focus command is missing
+    try {
+      await vscode.commands.executeCommand('antigravity.toggleChatFocus');
+    } catch {
+      try {
+        await vscode.commands.executeCommand('workbench.action.chat.open');
+      } catch {
+        try {
+          await vscode.commands.executeCommand('antigravity.panel.focus');
+        } catch {}
+      }
+    }
+
+    // Group A Item 4: Inject multi-modal structured context if provided
+    if (context && context.length > 0) {
+      const rawChunks: any[] = [];
+      for (const c of context) {
+        if (c.type === 'file' && c.uri && c.range) {
+          rawChunks.push({
+            type: 'file',
+            uri: c.uri,
+            range: {
+              startLineNumber: c.range.startLineNumber ?? c.range.startLine,
+              endLineNumber: c.range.endLineNumber ?? c.range.endLine,
+            },
+          });
+        } else if (c.type === 'file' && c.uri) {
+          rawChunks.push({ type: 'file', uri: c.uri });
+        } else if (c.type === 'link' && c.url) {
+          rawChunks.push({ type: 'link', url: c.url });
+        } else if (c.text) {
+          rawChunks.push({ type: 'text', text: c.text });
+        }
+      }
+      if (rawChunks.length > 0) {
+        await vscode.commands.executeCommand('antigravity.addContext', rawChunks).catch(() => {});
+        this.addLogLine(`[Context Injected] Injected ${rawChunks.length} context item(s) into chat.`, 'info');
+      }
+    }
+
+    // 1. Primary: Native Antigravity IDE Agent Panel submission (verified standard command in Antigravity)
     try {
       await vscode.commands.executeCommand('antigravity.sendPromptToAgentPanel', finalPrompt);
       this.addLogLine(`[Prompt Dispatched] Delivered directly to Antigravity Agent Chat Panel`, 'info');
       return;
     } catch (err: any) {
-      this.addLogLine(`[antigravity.sendPromptToAgentPanel Failed] ${err?.message || err}. Falling back to queue marker...`, 'warn');
+      this.addLogLine(`[sendPromptToAgentPanel not available]: ${err?.message || err}. Trying addContext + triggerSend...`, 'debug');
     }
 
-    // 2. Fallback: Queue to active session directory if found
+    // 2. Secondary: Forward compatibility for newer internal builds (addContext + triggerSend)
+    try {
+      await vscode.commands.executeCommand('antigravity.addContext', finalPrompt);
+      await vscode.commands.executeCommand('antigravity.triggerSend');
+      this.addLogLine(`[Prompt Dispatched] Delivered via addContext + triggerSend`, 'info');
+      return;
+    } catch (err: any) {
+      this.addLogLine(`[addContext + triggerSend not available]: ${err?.message || err}. Trying clipboard paste fallback...`, 'debug');
+    }
+
+    // 3. Tertiary fallback: Focus panel and paste via clipboard
+    try {
+      await vscode.env.clipboard.writeText(finalPrompt);
+      try {
+        await vscode.commands.executeCommand('antigravity.toggleChatFocus');
+      } catch {
+        try {
+          await vscode.commands.executeCommand('workbench.action.chat.open');
+        } catch {}
+      }
+      await vscode.commands.executeCommand('editor.action.clipboardPasteAction');
+      await vscode.commands.executeCommand('antigravity.sendPromptToAgentPanel', '').catch(async () => {
+        await vscode.commands.executeCommand('antigravity.triggerSend').catch(async () => {
+          await vscode.commands.executeCommand('workbench.action.chat.submit').catch(() => {});
+        });
+      });
+      this.addLogLine(`[Prompt Dispatched] Delivered via clipboard paste fallback`, 'info');
+      return;
+    } catch (err: any) {
+      this.addLogLine(`[Clipboard paste fallback Failed] ${err?.message || err}. Falling back to queue marker...`, 'warn');
+    }
+
     const convId = this.findActiveConversationId();
     if (convId) {
       try {
         const home = os.homedir();
-        const messagesDir = path.join(home, '.gemini', 'antigravity-ide', 'brain', convId, '.system_generated', 'messages');
+        const candidateBases = [
+          path.join(home, '.gemini', 'antigravity-ide'),
+          path.join(home, '.gemini', 'antigravity'),
+        ];
+        let base = this.getGeminiAntigravityBase();
+        for (const b of candidateBases) {
+          if (fs.existsSync(path.join(b, 'brain', convId))) {
+            base = b;
+            break;
+          }
+        }
+        const messagesDir = path.join(base, 'brain', convId, '.system_generated', 'messages');
         const undeliveredDir = path.join(messagesDir, 'undelivered');
         if (!fs.existsSync(undeliveredDir)) {
           fs.mkdirSync(undeliveredDir, { recursive: true });
@@ -771,6 +982,30 @@ export class DaemonManager extends EventEmitter {
           workspacePath: currentWsPath,
         };
         this.wsClient?.send(JSON.stringify(helloMsg));
+
+        // Group A Item 1: Interop with upstream Antigravity Language Server credentials
+        try {
+          const upstream =
+            vscode.extensions.getExtension('google.antigravity') ||
+            vscode.extensions.getExtension('google.google-antigravity');
+          if (upstream?.exports) {
+            const exp = upstream.exports;
+            const csrfToken = exp.csrfToken ?? exp.extensionServerCsrfToken;
+            const port = typeof exp.port === 'function' ? exp.port() : (exp.port ?? exp.extensionServerPort);
+            if (port && csrfToken) {
+              const credMsg: WsClientMessage = {
+                type: 'client:upstream_credentials',
+                port: Number(port),
+                csrfToken: String(csrfToken),
+              };
+              this.wsClient?.send(JSON.stringify(credMsg));
+              this.addLogLine(`[Interop] Shared Language Server API credentials (port: ${port}) with daemon.`, 'ipc');
+            }
+          }
+        } catch (e: any) {
+          this.addLogLine(`[Interop] Could not extract upstream credentials: ${e?.message || e}`, 'warn');
+        }
+
         this.emit('ws_connected');
 
         this.pingInterval = setInterval(() => {
@@ -887,9 +1122,46 @@ export class DaemonManager extends EventEmitter {
         this.emit('mode_changed', msg.mode);
         break;
 
-      case 'server:forward_prompt':
-        this.injectPromptIntoIde(msg.prompt, msg.images, msg.model);
+      case 'server:set_model':
+        if (msg.model) {
+          this.addLogLine(`[Model Selected from Phone]: ${msg.model}`, 'info');
+        }
         break;
+
+      case 'server:forward_prompt':
+        this.injectPromptIntoIde(msg.prompt, msg.images, msg.model, msg.context);
+        break;
+
+      case 'server:resolve_file_diff': {
+        this.recordActivity();
+        const action = msg.action;
+        const fileUri = msg.fileUri;
+        this.addLogLine(`[Diff Triage] Remote ${action.toUpperCase()} for ${fileUri}`, 'ipc');
+        const cmd = action === 'accept'
+          ? 'antigravity.prioritized.agentAcceptAllInFile'
+          : 'antigravity.prioritized.agentRejectAllInFile';
+        vscode.commands.executeCommand(cmd, fileUri).then(
+          () => {
+            this.addLogLine(`[Diff Triage Succeeded] ${cmd} executed for ${fileUri}`, 'ipc');
+          },
+          () => {
+            const fallback = action === 'accept' ? 'antigravity.inlineDiff.acceptAll' : 'antigravity.inlineDiff.rejectAll';
+            vscode.commands.executeCommand(fallback).catch(() => {});
+          }
+        );
+        break;
+      }
+
+      case 'server:open_conversation': {
+        this.recordActivity();
+        if (msg.conversationId) {
+          this.addLogLine(`[Open Conversation] Switching active session to: ${msg.conversationId.slice(0, 8)}`, 'info');
+          vscode.commands.executeCommand('antigravity.openConversation', msg.conversationId).catch(err => {
+            this.addLogLine(`[Open Conversation Failed] ${err?.message || err}`, 'warn');
+          });
+        }
+        break;
+      }
 
       case 'server:open_workspace':
         if (msg.path) {
@@ -902,6 +1174,7 @@ export class DaemonManager extends EventEmitter {
         this.addLogLine('[Emergency Stop] Interrupted from mobile companion. Halting active agent task...', 'warn');
         // Halt agent execution in Antigravity IDE
         const cancelCommands = [
+          'antigravity.dynamic.interruptAgent',
           'antigravity.cancelAgent',
           'antigravity.stopAgent',
           'workbench.action.chat.cancel',

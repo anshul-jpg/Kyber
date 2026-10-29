@@ -2,14 +2,30 @@
   "name": "antigravity-companion",
   "displayName": "KYBER",
   "description": "Autonomous Pocket Supervisor & Tool Gatekeeper for Antigravity, Codex & Claude Code",
-  "version": "0.1.0",
-  "publisher": "anshul",
+  "version": "1.0.0",
+  "publisher": "anshuly69",
   "engines": {
     "vscode": "^1.85.0"
   },
   "categories": [
     "AI",
     "Other"
+  ],
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anshul-jpg/Kyber"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "antigravity",
+    "companion",
+    "remote",
+    "approval",
+    "mobile",
+    "ai-agent",
+    "codex",
+    "claude-code"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [

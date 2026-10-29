@@ -16,7 +16,7 @@ import os from 'os';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import qrcode from 'qrcode-terminal';
 import cloudflared from 'cloudflared';
 import { DEFAULT_DAEMON_PORT, HOOK_IPC_PORT, encodePairingTicket, PairingTicket } from '@agy-companion/protocol';
@@ -38,22 +38,34 @@ function getNetworkAddresses(): NetworkAddresses {
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name] || []) {
       if (iface.family === 'IPv4' && !iface.internal) {
-        // Detect Tailscale IP (100.64.0.0/10) or interface name
-        if (name.toLowerCase().includes('tailscale') || iface.address.startsWith('100.')) {
+        // Skip link-local auto-assigned APIPA (169.254.x.x)
+        if (iface.address.startsWith('169.254.')) {
+          continue;
+        }
+
+        // Detect real Tailscale CGNAT IP (100.64.0.0/10)
+        if (iface.address.startsWith('100.')) {
           tailscaleIp = iface.address;
           continue;
         }
 
-        // Skip link-local auto-assigned APIPA
-        if (!iface.address.startsWith('169.254.')) {
-          if (name.toLowerCase().includes('wi-fi') || name.toLowerCase().includes('ethernet')) {
-            candidates.unshift(iface.address);
-          } else {
-            candidates.push(iface.address);
-          }
+        if (name.toLowerCase().includes('wi-fi') || name.toLowerCase().includes('ethernet')) {
+          candidates.unshift(iface.address);
+        } else {
+          candidates.push(iface.address);
         }
       }
     }
+  }
+
+  // Fallback: check tailscale CLI if interface hasn't finished handshake
+  if (!tailscaleIp) {
+    try {
+      const out = execSync('tailscale ip -4', { encoding: 'utf8', timeout: 1500, windowsHide: true }).trim();
+      if (out && out.startsWith('100.')) {
+        tailscaleIp = out;
+      }
+    } catch {}
   }
 
   return {
@@ -139,6 +151,36 @@ async function main() {
     process.exit(0);
   }
 
+  // Subcommand: agy-companion service [install | uninstall | status]
+  if (args[0] === 'service') {
+    const action = args[1] || 'status';
+    const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const vbsPath = path.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'agy-companion.vbs');
+    const binScript = path.resolve(__dirname, 'agy-companion.js');
+
+    if (action === 'install') {
+      const dir = path.dirname(vbsPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const content = `Set WshShell = CreateObject("WScript.Shell")\r\nWshShell.Run "node """ & "${binScript.replace(/\\/g, '\\\\')}" & """", 0, False\r\n`;
+      fs.writeFileSync(vbsPath, content, 'utf8');
+      console.log('✓ 24/7 Background Service registered! Antigravity Companion will run silently on Windows boot.');
+      console.log(`  Startup script: ${vbsPath}`);
+      process.exit(0);
+    } else if (action === 'uninstall') {
+      if (fs.existsSync(vbsPath)) {
+        fs.unlinkSync(vbsPath);
+        console.log('✓ 24/7 Background Service unregistered.');
+      } else {
+        console.log('24/7 Background Service is not currently installed.');
+      }
+      process.exit(0);
+    } else {
+      const exists = fs.existsSync(vbsPath);
+      console.log(`24/7 Background Service status: ${exists ? 'ENABLED (runs on Windows boot)' : 'DISABLED'}`);
+      process.exit(0);
+    }
+  }
+
   // Help command
   if (args.includes('--help') || args.includes('-h')) {
     console.log(`
@@ -147,6 +189,8 @@ Antigravity Companion CLI
 Commands:
   agy-companion                     Start the companion daemon server
   agy-companion --tunnel            Start daemon with a free Cloudflare Quick Tunnel (public HTTPS)
+  agy-companion service install     Register 24/7 background autostart on Windows boot
+  agy-companion service uninstall   Remove 24/7 background autostart
   agy-companion hook install [dir]  Install universal hook into project workspace (default: .)
   agy-companion hook install -g     Install universal hook globally (~/.gemini/config/hooks.json)
 

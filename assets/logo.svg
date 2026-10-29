@@ -1,6 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="48" height="48" fill="none">
-  <!-- Left Staggered Facet (Pure White) -->
-  <polygon points="48.5,18 22,58 48.5,98" fill="#ffffff" />
-  <!-- Right Elevated Facet (Platinum Titanium) -->
-  <polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa" opacity="0.8" />
+  <!-- Monolithic Vertical Spine -->
+  <rect x="18" y="16" width="13" height="68" rx="2.5" fill="#ffffff" />
+  <!-- Primary Internal Chevron Blade -->
+  <path d="M52 16 L31 50 L52 84 H39 L22 50 L39 16 H52 Z" fill="#ffffff" />
+  <!-- Forward Auxiliary Blade (Antigravity Blue / Electric Ice) -->
+  <path d="M82 16 L61 50 L82 84 H69 L52 50 L69 16 H82 Z" fill="#0078d4" />
 </svg>

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" fill="none">
+  <defs>
+    <linearGradient id="bgGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141518" />
+      <stop offset="50%" stop-color="#0c0d0e" />
+      <stop offset="100%" stop-color="#070809" />
+    </linearGradient>
+    <radialGradient id="centerGlow" cx="50%" cy="40%" r="55%">
+      <stop offset="0%" stop-color="#0078d4" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#0078d4" stop-opacity="0" />
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="rgba(255,255,255,0.025)" stroke-width="1" />
+    </pattern>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1280" height="640" fill="url(#bgGlow)" />
+  <rect width="1280" height="640" fill="url(#centerGlow)" />
+  <rect width="1280" height="640" fill="url(#grid)" />
+
+  <!-- Outer 1px Hairline Frame -->
+  <rect x="24" y="24" width="1232" height="592" rx="16" stroke="rgba(255,255,255,0.08)" stroke-width="1" fill="none" />
+
+  <!-- Center Branding Group -->
+  <g transform="translate(640, 240)">
+    <!-- Real Kyber Helmsman Needle Vector Mark -->
+    <g transform="translate(-40, -110) scale(0.8)">
+      <polygon points="48.5,18 22,58 48.5,98" fill="#ffffff" />
+      <polygon points="51.5,2 78,42 51.5,82" fill="#a1a1aa" opacity="0.85" />
+    </g>
+
+    <!-- Project Title -->
+    <text y="30" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Inter', sans-serif" font-size="56" font-weight="800" letter-spacing="6" fill="#ffffff">KYBER</text>
+    
+    <!-- Tagline -->
+    <text y="75" text-anchor="middle" font-family="'Geist Mono', Consolas, monospace" font-size="16" font-weight="600" letter-spacing="2.5" fill="#38bdf8">AUTONOMOUS POCKET SUPERVISOR</text>
+    
+    <!-- Description -->
+    <text y="125" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" font-size="19" font-weight="400" fill="#a1a1aa">Local-First Mobile Supervisor &amp; Tool Gatekeeper for Antigravity, Codex &amp; Claude Code</text>
+  </g>
+
+  <!-- Bottom Capability Chips -->
+  <g transform="translate(640, 520)">
+    <!-- Chip 1: Lockscreen Gates -->
+    <g transform="translate(-360, 0)">
+      <rect x="-10" y="-16" width="220" height="32" rx="16" fill="#18181b" stroke="rgba(255,255,255,0.08)" />
+      <circle cx="6" cy="0" r="3.5" fill="#22c55e" />
+      <text x="20" y="4" font-family="'Geist Mono', monospace" font-size="11" font-weight="500" fill="#d4d4d8">1-Tap Tool Gates</text>
+    </g>
+
+    <!-- Chip 2: ask_question Support -->
+    <g transform="translate(-110, 0)">
+      <rect x="-10" y="-16" width="220" height="32" rx="16" fill="#18181b" stroke="rgba(255,255,255,0.08)" />
+      <circle cx="6" cy="0" r="3.5" fill="#38bdf8" />
+      <text x="20" y="4" font-family="'Geist Mono', monospace" font-size="11" font-weight="500" fill="#d4d4d8">ask_question Cards</text>
+    </g>
+
+    <!-- Chip 3: Git Changes -->
+    <g transform="translate(140, 0)">
+      <rect x="-10" y="-16" width="220" height="32" rx="16" fill="#18181b" stroke="rgba(255,255,255,0.08)" />
+      <circle cx="6" cy="0" r="3.5" fill="#f59e0b" />
+      <text x="20" y="4" font-family="'Geist Mono', monospace" font-size="11" font-weight="500" fill="#d4d4d8">Live Git Diff Triage</text>
+    </g>
+  </g>
+</svg>
