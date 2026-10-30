@@ -1,193 +1,197 @@
 <p align="center">
-  <img src="assets/logo.svg" width="72" height="72" alt="KYBER Logo" />
+  <img src="assets/logo.svg" width="64" height="64" alt="KYBER" />
 </p>
 
-<h1 align="center">KYBER</h1>
+<h1 align="center">kyber</h1>
 
 <p align="center">
-  <strong>Your AI agent should keep coding while you walk away.</strong><br>
-  <em>Autonomous Pocket Supervisor & Real-Time Tool Gatekeeper for Antigravity, Codex & Claude Code.</em>
-</p>
-
-<p align="center">
-  <a href="#-quickstart-60-second-onboarding"><strong>Quickstart</strong></a> •
-  <a href="#-the-problem-why-kyber"><strong>Why Kyber</strong></a> •
-  <a href="#-core-capabilities"><strong>Features</strong></a> •
-  <a href="#-architecture"><strong>Architecture</strong></a> •
-  <a href="#-android-companion-apk"><strong>Android App</strong></a> •
-  <a href="#-security--privacy"><strong>Security</strong></a>
+  Local-first mobile supervisor and tool gatekeeper for <strong>Antigravity</strong>, <strong>Codex</strong>, and <strong>Claude Code</strong>.
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-v0.1.0-blue.svg?style=flat-square" alt="Version" />
-  <img src="https://img.shields.io/badge/tests-12%20passing-success.svg?style=flat-square" alt="Tests" />
-  <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg?style=flat-square" alt="License" />
-  <img src="https://img.shields.io/badge/antigravity-native%20ide-007acc.svg?style=flat-square" alt="Antigravity IDE" />
-  <img src="https://img.shields.io/badge/android-apk%20ready-3ddc84.svg?style=flat-square" alt="Android Ready" />
+  <a href="#overview">Overview</a> &bull;
+  <a href="#features">Features</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="#installation">Installation</a> &bull;
+  <a href="#core-subsystems">Subsystems</a> &bull;
+  <a href="#network-topology">Networking</a> &bull;
+  <a href="#security-model">Security</a> &bull;
+  <a href="#license">License</a>
 </p>
 
 <p align="center">
-  <img src="assets/banner.svg" alt="Kyber Interface Showcase" width="100%" />
+  <img src="assets/banner.svg" alt="KYBER Architecture & Interface Showcase" width="100%" />
 </p>
 
 ---
 
-## 💡 The Problem: Why Kyber?
+## Overview
 
-You prompt your AI coding agent with a high-leverage task, leave your desk to grab lunch or make coffee, and come back 30 minutes later.
+When coding agents execute in continuous loops, they inevitably hit tool boundaries requiring operator intervention: shell execution confirmations (`run_command`), destructive file modifications (`write_to_file`), or interactive clarification prompts (`ask_question`). 
 
-**Result?** The agent stopped 90 seconds after you walked away, waiting for you to click **"Allow"** on an `npm install`, a file edit, or a clarification question. Your deep work session stalled while your PC sat idle.
+Without a supervisor present at the physical terminal, the agent idles at the permission gate, blocking progress.
 
-**Kyber eliminates the walk-away tax.**
+**Kyber eliminates this bottleneck.** It intercepts agent lifecycle hooks at the IDE process boundary and projects actionable decisions, real-time telemetry, and git diffs directly to a secondary device (Android APK or standalone PWA) over an encrypted local mesh.
 
-It runs as a silent, background companion daemon integrated into Antigravity IDE and VS Code. When an agent requests a sensitive tool, Kyber pushes an actionable card straight to your smartphone. Tap **Allow**, **Deny**, or dictate a multimodal voice directive—from your pocket, anywhere in your house or across the globe.
+### Core Guarantees
+
+* **Zero Cloud Dependency:** Operates strictly over loopback IPC, local Wi-Fi, or peer-to-peer Tailscale meshes. Prompts, diffs, and source code never transit third-party relay servers.
+* **Deterministic Fallback:** If the companion daemon terminates or network dropouts occur, the interceptor defaults to `{"decision": "deny"}`, preventing unmonitored agent runaway.
+* **Sub-50ms Latency:** Unix named-pipe / TCP loopback IPC resolves approvals in under 50 milliseconds over local interfaces.
 
 ---
 
-## ⚡ Quickstart (60-Second Onboarding)
+## Architecture
 
-Choose the setup that fits your workflow. Zero cloud subscriptions, zero configuration hurdles.
+Kyber operates across three decoupled process boundaries:
 
-### Method 1: Windows 1-Liner (Recommended)
-Open PowerShell and run the self-install command:
+```
++-------------------------------------------------------------------+
+|                        ANTIGRAVITY IDE / VS CODE                  |
+|                                                                   |
+|   Agent Tool Invocation (run_command, edit, ask_question)         |
+|                               |                                   |
+|                               v                                   |
+|                     .agents/interceptor.js                        |
+|                               |                                   |
+|                               v  (Local IPC: Port 4041)           |
++-------------------------------+-----------------------------------+
+                                |
++-------------------------------v-----------------------------------+
+|                     KYBER DAEMON (Port 4040)                      |
+|                                                                   |
+|   - Tool Interception Gateway & Approval State Machine            |
+|   - Headless Git Working Tree Engine (Status, Diff, Stage)        |
+|   - Language Server Quota RPC Adapter                             |
+|   - Framebuffer Screen Capture Service                            |
+|   - WebSocket Client Synchronizer & Discovery Engine              |
++-------------------------------+-----------------------------------+
+                                |
+             +------------------+------------------+
+             |                                     |
+             v                                     v
+     Local Area Network                     Tailscale WireGuard
+     (Direct IP:Port)                       (Encrypted Mesh)
+             |                                     |
+             +------------------+------------------+
+                                |
++-------------------------------v-----------------------------------+
+|                        KYBER MOBILE CLIENT                        |
+|             (Android APK / Standalone PWA Engine)                 |
+|                                                                   |
+|   - [Gate]      Haptic Allow/Deny, Options, & Write-in Prompts    |
+|   - [Changes]   Porcelain Git Diffs, Staging, & Direct Commits    |
+|   - [Screen]    Desktop Mirror & Dialog Snapshot Fallback         |
+|   - [Files]     Active Workspace Editor Tabs & File Tree          |
++-------------------------------------------------------------------+
+```
+
+---
+
+## Installation
+
+Choose whichever method fits your development environment:
+
+### Channel 1: Windows 1-Liner (PowerShell)
+
+Open PowerShell and run:
+
 ```powershell
 irm https://raw.githubusercontent.com/anshul-jpg/Kyber/main/install.ps1 | iex
 ```
-*(Or locally from cloned repo: `powershell -ExecutionPolicy Bypass -File .\install.ps1`)*
 
-**What this does automatically:**
-1. Installs the self-contained `.vsix` into Antigravity IDE.
-2. Writes the universal tool interceptor to `~/.gemini/config/hooks.json`.
-3. Sets companion mode to `remote` so approvals instantly route to your phone.
+*(Or locally from cloned repo: `powershell -ExecutionPolicy Bypass -File .\install.ps1`)*  
+Automatically builds the local extension, installs the global tool interceptor, and boots the background daemon.
 
----
+### Channel 2: VS Code / Antigravity IDE Extension
 
-### Method 2: Antigravity & VS Code Extension (`.vsix`)
-The extension package is **100% self-contained** ("batteries included"):
-1. Download **`antigravity-companion-0.1.0.vsix`** from the [Releases](packages/vscode-extension/antigravity-companion-0.1.0.vsix) tab.
-2. In Antigravity / VS Code: Open Extensions (`Ctrl+Shift+X`) $\rightarrow$ Click `...` $\rightarrow$ **Install from VSIX...**
-3. Select the file. The bundled daemon and web engine boot silently in the background.
-4. Scan the pairing QR code from the left Activity Bar!
+1. Install **KYBER** directly from the VS Code Marketplace or download `antigravity-companion-0.1.0.vsix` from [Releases](https://github.com/anshul-jpg/Kyber/releases).
+2. Open the **KYBER** view in the Activity Bar.
+3. Scan the pairing QR code with your phone camera or navigate to the displayed local URL.
 
----
+### Channel 3: Standalone CLI Daemon (Headless / SSH / Devcontainers)
 
-### Method 3: Headless Terminal / Remote Dev Server (`npx`)
-For SSH sessions, dev containers, Claude Code CLI, or Codex:
+For remote dev boxes, SSH sessions, or headless devcontainers:
+
 ```bash
-# Start standalone companion daemon with pairing QR
-npx kyber-companion start
+# Clone the repository
+git clone https://github.com/anshul-jpg/Kyber.git
+cd Kyber
 
-# Or install tool interceptor globally
-npx kyber-companion hook install -g
+# Install dependencies and build
+npm install
+npm run build
+
+# Start daemon
+node packages/cli/dist/bin/agy-companion.js start
+```
+
+To attach an individual project workspace:
+```bash
+node packages/cli/dist/bin/agy-companion.js hook install .
 ```
 
 ---
 
-## 📱 Mobile Companion & Android APK
+## Features
 
-Kyber provides two instant mobile experiences:
-
-| Feature | Instant Web Companion (PWA) | Native Android APK |
-| :--- | :--- | :--- |
-| **Install Friction** | **Zero install** (Scan QR $\rightarrow$ Open in Browser) | Download `.apk` from Releases or Extension |
-| **Connectivity** | Local Wi-Fi & Tailscale Mesh | Local Wi-Fi, Tailscale, Cloudflare |
-| **Lockscreen Alerts** | Browser notifications | **Native high-priority Android notifications** |
-| **Background Vibrate** | While browser tab is open | **Yes (Foreground Service ID 9001)** |
-| **Hardware Wake-on-LAN** | Network dependent | **1-Tap Wake dormant PC** |
-
-> **Direct APK Download:** The companion daemon serves the compiled Android APK directly at `http://<your-pc-ip>:4040/download/app.apk`.
+* **Tactile Approval Gate:** High-stakes operations (`run_command`, `write_to_file`, file deletions) trigger immediate lockscreen notifications with 1-tap `[Allow]` / `[Deny]` actions and haptic confirmation.
+* **Interactive Direction (`ask_question`):** Complex agent questions render as selectable chips with custom write-in input, resolving directly back into the IDE turn.
+* **Headless Git Triage:** Review working-tree status, examine line-by-line unified diffs with syntax highlighting, stage/unstage files, and author atomic commits directly from your phone.
+* **Live Agent Telemetry:** Watch the agent's thought stream, live terminal output (`stdout`/`stderr`), and real-time model quotas (Claude 3.5 Sonnet, Claude Opus, Gemini Flash) without touching your desk.
+* **Desktop Screen Snapshot Fallback:** On-demand desktop framebuffer capture (`GET /api/host/screen.jpg`) to check external OS dialogs, browser popups, or compiler error windows when away from your monitor.
+* **Local-First & Zero-Trust Mesh:** 100% peer-to-peer over local Wi-Fi or encrypted Tailscale WireGuard. Prompts, diffs, and code never transit third-party relay servers.
+* **Hardware Power & Wake Connectors:** Pluggable connector architecture with built-in hooks for Wake-on-LAN (WoL) and smart plug power cycling.
 
 ---
 
-## ✨ Core Capabilities
+## Core Subsystems
 
-### 1. Dual-Mode Governance: Desk vs Remote
-Toggle between modes from the status bar or phone with zero friction:
-* **Desk Mode:** You are actively at your desk. Tool confirmations appear as standard desktop IDE dialogs. Phone notifications stay silent.
-* **Remote Mode:** You stepped away. Desktop confirmation dialogs are suppressed; actionable cards buzz directly on your phone with haptic feedback.
-* **Autonomous Mode:** Safe tools execute continuously; critical shell commands queue for single-tap batch clearance.
+### 1. Tool Interception & Question Resolution
 
-### 2. Full `ask_question` Support via Mobile QuestionCard
-When an agent stops to ask for architectural clarification or design direction, it renders as a native, numbered card on your phone with selectable chips and custom write-in input. Answer complex choices without touching your PC.
+When an agent requests execution permissions:
+* In **Desk Mode**, approvals render as native desktop dialogs inside the IDE.
+* In **Remote Mode**, desktop popups are suppressed. Actionable decision payloads forward to the mobile client with tactile vibration feedback.
+* **`ask_question` Handling:** Complex multi-choice questions render as interactive chips with custom write-in capabilities, allowing complete architectural direction from mobile.
 
-### 3. Real-Time Telemetry & Git Diffs
-Review exact file changes, git diff snippets, and terminal outputs on mobile before hitting **Approve**.
+### 2. Headless Git Working Tree Engine
 
-### 4. Emergency Killswitch
-Rogue loop or unexpected delete command? Tap the red **Emergency Stop** button on mobile to instantly terminate execution, pause the agent, and deny pending operations.
+Exposes porcelain status, diffs, and staging operations without requiring shell access:
+* `GET /api/git/status`: Active branch, staged count, modified file paths, and delta stats.
+* `GET /api/git/diff`: Line-by-line unified diff calculation with syntax highlighting.
+* `POST /api/git/stage` & `POST /api/git/unstage`: Selective staging control.
+* `POST /api/git/commit`: Direct atomic commit authoring from the mobile interface.
 
-### 5. Multimodal Voice Directives
-Send spoken voice notes or screenshots from your phone camera directly into the active Antigravity chat session.
+### 3. Language Server Telemetry
 
----
+Direct query integration with the underlying IDE language server:
+* Streams real-time token quotas, weekly usage percentages, and rate-limit reset countdowns for configured models (Claude 3.5 Sonnet, Claude Opus, Gemini Flash).
 
-## 🏗️ Architecture
+### 4. Framebuffer Screen Snapshot
 
-Kyber follows an **Open Connector local-first design** with zero external cloud dependencies.
-
-```text
-┌────────────────────────────────────────────────────────┐
-│                   ANTIGRAVITY IDE                      │
-│                                                        │
-│  Agent Tool Request (run_command / write_to_file)      │
-│                     │                                  │
-│                     ▼                                  │
-│         .agents/interceptor.js                         │
-│                     │ (Unix/Named Pipe IPC: 4041)      │
-└─────────────────────┼──────────────────────────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────┐
-│             KYBER ENGINE (DAEMON : 4040)               │
-│                                                        │
-│  - WebSocket Gateway & State Synchronizer              │
-│  - Recent Projects Hub & Multi-Workspace Manager       │
-│  - E2EE Pairing Key & Ephemeral Ticket Auth            │
-└─────────────────────┬──────────────────────────────────┘
-                      │
-       ┌──────────────┴──────────────┐
-       ▼                             ▼
- Local Wi-Fi / Tailscale      Cloudflare Tunnel
-       │                             │
-       └──────────────┬──────────────┘
-                      ▼
-┌────────────────────────────────────────────────────────┐
-│                MOBILE COMPANION                        │
-│   (Web PWA / Android APK Foreground Service: 9001)     │
-│                                                        │
-│   - Instant Haptic Tool Approval Modal                 │
-│   - Live Terminal Output & Code Diff Viewer            │
-│   - Voice Directives & Model Directives                │
-└────────────────────────────────────────────────────────┘
-```
+* `GET /api/host/screen.jpg`: Lightweight native screen grab engine for inspecting unhandled system dialogs, browser popups, or external compiler error windows while remote.
 
 ---
 
-## 🔒 Security & Privacy Guarantees
+## Network Topology & Pairing
 
-* **Zero Cloud Storage:** Your source code, file contents, prompts, and credentials **never touch an external cloud server**.
-* **E2EE Ephemeral Pairing:** The daemon generates a cryptographically random authorization ticket upon launch, verified during handshake.
-* **Read-Only Safe Proxy:** Unpaired devices cannot trigger shell executions or approve operations.
+### Communication Paths
 
----
-
-## 📦 Monorepo Structure
-
-```text
-kyber/
-├── install.ps1                # Chris Titus-style Windows 1-liner installer
-├── install.sh                 # Linux / macOS universal installer
-├── assets/                    # Screenshots, logos, and interface banners
-├── packages/
-│   ├── vscode-extension/      # Antigravity & VS Code extension (bundled VSIX)
-│   ├── cli/                   # Standalone daemon, WebSockets & IPC server
-│   ├── web/                   # React + Vite mobile PWA & Capacitor Android app
-│   └── protocol/              # Shared TypeScript contracts, tickets & schemas
-└── package.json               # Monorepo workspace configuration
-```
+1. **Local Wi-Fi (Sub-5ms):** Direct HTTP/WebSocket connection over local subnet (`192.168.x.x:4040`).
+2. **Tailscale Mesh (Global):** Authenticated WireGuard connection across machines without port forwarding (`100.x.x.x:4040`).
+3. **Cloudflare Named Tunnel:** Optional TLS tunneling for corporate networks where UDP/P2P is restricted.
 
 ---
 
-## 🧪 Development & Testing
+## Security Model
+
+* **Token-Based Handshake:** Pairings require a cryptographically random hex token generated at daemon initialization. Unauthorized HTTP or WebSocket probes receive `401 Unauthorized`.
+* **Zero Telemetry Collection:** Kyber contains no analytic trackers, telemetry beacons, or external reporting endpoints.
+* **Loopback Boundary:** Interceptor sockets bind exclusively to loopback addresses (`127.0.0.1`), ensuring process-to-process isolation on multi-user hosts.
+
+---
+
+## Development & Testing
 
 ```bash
 # Clone and install dependencies
@@ -204,6 +208,6 @@ npm run package:ext
 
 ---
 
-<p align="center">
-  Crafted for autonomous developers who refuse to baby-sit their AI.
-</p>
+## License
+
+Apache-2.0. Copyright &copy; 2026 Anshul.

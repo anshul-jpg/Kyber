@@ -59,3 +59,33 @@ if (fs.existsSync(interceptorSrc)) {
   copyRecursiveSync(interceptorSrc, targetInterceptor);
   console.log('[Bundle] Interceptor hook synchronized.');
 }
+
+// 4. Live-sync to active Antigravity IDE extensions directory if present
+const home = process.env.USERPROFILE || process.env.HOME || '';
+const extDirNames = ['anshuly69.antigravity-companion-1.0.0', 'anshuly69.antigravity-companion-0.1.0'];
+const baseExtDirs = [
+  path.join(home, '.antigravity-ide', 'extensions'),
+  path.join(home, '.antigravity', 'extensions'),
+];
+for (const base of baseExtDirs) {
+  for (const extDirName of extDirNames) {
+    const ideExtDir = path.join(base, extDirName);
+    if (fs.existsSync(ideExtDir)) {
+      console.log(`[Bundle] Live-syncing build to ${ideExtDir}...`);
+      try {
+        copyRecursiveSync(path.join(extRoot, 'dist'), path.join(ideExtDir, 'dist'));
+        copyRecursiveSync(path.join(extRoot, 'media'), path.join(ideExtDir, 'media'));
+        fs.copyFileSync(path.join(extRoot, 'package.json'), path.join(ideExtDir, 'package.json'));
+        if (fs.existsSync(path.join(extRoot, 'README.md'))) {
+          fs.copyFileSync(path.join(extRoot, 'README.md'), path.join(ideExtDir, 'README.md'));
+        }
+        if (fs.existsSync(path.join(extRoot, 'LICENSE'))) {
+          fs.copyFileSync(path.join(extRoot, 'LICENSE'), path.join(ideExtDir, 'LICENSE'));
+        }
+        console.log(`[Bundle] Live-synced extension, README, and assets to ${ideExtDir} successfully!`);
+      } catch (err) {
+        console.warn(`[Bundle Warning] Could not live-sync to ${ideExtDir}:`, err.message);
+      }
+    }
+  }
+}

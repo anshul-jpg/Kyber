@@ -1,49 +1,66 @@
-# 🌌 Kyber v0.1.0 — Initial Release
+# Kyber v1.0.0 Release Notes
 
-> **"Your AI agent should keep coding while you walk away."**  
-> Autonomous Pocket Supervisor & Real-Time Tool Gatekeeper for Antigravity, Codex & Claude Code.
+Autonomous pocket supervisor and tool gatekeeper for Antigravity, Codex, and Claude Code.
 
 ---
 
-### 📦 Downloads & Artifacts
+## Artifacts
 
-| Artifact | Target | Description |
+| File | Target | Description |
 | :--- | :--- | :--- |
-| **`kyber-companion.apk`** | Android 8.0+ | Native mobile companion with background push notifications (Foreground Service ID 9001) & haptic vibration alerts. |
-| **`kyber-0.1.0.vsix`** | Antigravity IDE / VS Code | Self-contained extension with bundled companion daemon, web companion PWA, and tool interceptor. |
+| `kyber-companion.apk` | Android 8.0+ | Native Android APK with persistent foreground service (ID 9001), camera QR scanner, and haptic tool approvals. |
+| `antigravity-companion-1.0.0.vsix` | Antigravity IDE / VS Code | Extension package including bundled daemon, tool interceptor, and pairing hub. |
 
 ---
 
-### ⚡ 60-Second Quickstart
+## Installation
 
-#### Windows 1-Liner (PowerShell):
+### PowerShell (Windows)
+
 ```powershell
 irm https://raw.githubusercontent.com/anshul-jpg/Kyber/main/install.ps1 | iex
 ```
 
-#### Antigravity / VS Code Extension:
-1. Download `kyber-0.1.0.vsix` below.
-2. Open IDE $\rightarrow$ Extensions (`Ctrl+Shift+X`) $\rightarrow$ Click `...` $\rightarrow$ **Install from VSIX...**
-3. Scan the pairing QR code from the left Activity Bar with your phone.
+### Manual Extension Install
+
+1. Download `antigravity-companion-1.0.0.vsix` from the release assets below.
+2. In Antigravity IDE or VS Code: Extensions (`Ctrl+Shift+X`) &rarr; Views Menu (`...`) &rarr; **Install from VSIX...**
+3. Open the **KYBER** view in the Activity Bar and scan the pairing QR code.
 
 ---
 
-### ✨ What's New in v0.1.0
+## Technical Highlights
 
-* **Dual-Mode Supervision:**
-  * **Desk Mode:** Standard desktop IDE confirmation dialogs when you're sitting at your computer.
-  * **Remote Mode:** Suppresses PC interruptions; routes every tool approval (`run_command`, `write_to_file`) to your phone with tactile haptic buttons (`[ ALLOW ]` / `[ DENY ]`).
-* **Full `ask_question` Support via Mobile QuestionCard:**
-  * Numbered chip selectors, custom write-in input, and instant resolve back to Antigravity without touching your PC.
-* **Instant Web Companion (PWA):**
-  * Zero-install web client served directly by the background daemon over local Wi-Fi or encrypted Tailscale mesh.
-* **Remote Directives & Emergency Killswitch:**
-  * Instant emergency abort button to freeze runaway agent shell execution.
-  * Multimodal voice notes and model directive injection.
-* **Local-First & End-to-End Encrypted:**
-  * Zero third-party cloud data storage. Ephemeral cryptographic token pairing handshake.
+### 1. Tool Interception & Approval Gate
+* Local IPC hook on port 4041 intercepting sensitive tool actions (`run_command`, `write_to_file`, file mutations).
+* Dual-mode routing:
+  * **Desk Mode:** Standard desktop IDE confirmation dialogs.
+  * **Remote Mode:** Suppresses PC popups; routes all approvals silently to mobile with tactile vibration feedback (`[ALLOW]` / `[DENY]`).
+* Full `ask_question` resolution via interactive option chips and custom write-in field.
+
+### 2. Mobile Companion Engine (Android APK & Standalone PWA)
+* Persistent background supervisor via Android Foreground Service (ID 9001).
+* In-app camera QR code scanner for 5-second initial pairing.
+* In-app APK updater using Android native `DownloadManager`.
+* Low-latency peer-to-peer connectivity over local Wi-Fi or authenticated Tailscale WireGuard mesh.
+
+### 3. Developer Triage & Telemetry
+* Headless Git working tree viewer: status, line-by-line syntax-highlighted diffs, file staging, and direct commit authoring.
+* Language server quota tracking: real-time token quotas and reset countdowns for Claude 3.5 Sonnet, Claude Opus, and Gemini Flash.
+* Framebuffer screen capture fallback (`GET /api/host/screen.jpg`) for unhandled desktop dialogs or compiler errors.
+* Live terminal output streaming (`stdout`/`stderr`) during agent shell execution.
+
+### 4. Privacy & Security
+* Zero external telemetry, tracking beacons, or third-party cloud relays.
+* Interceptor loopback boundary (`127.0.0.1`) with cryptographically random hex token pairing.
 
 ---
 
-### 🔒 Checksums (SHA-256)
-* Run `Get-FileHash -Algorithm SHA256 <filename>` in PowerShell to verify integrity.
+## Verification
+
+To verify artifact integrity after downloading:
+
+```powershell
+Get-FileHash -Algorithm SHA256 kyber-companion.apk
+Get-FileHash -Algorithm SHA256 antigravity-companion-1.0.0.vsix
+```
