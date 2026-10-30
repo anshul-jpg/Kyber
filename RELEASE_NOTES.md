@@ -1,6 +1,6 @@
 # Kyber v1.0.0 Release Notes
 
-Autonomous pocket supervisor and tool gatekeeper for Antigravity, Codex, and Claude Code.
+Autonomous pocket supervisor and tool gatekeeper for Google Antigravity IDE.
 
 ---
 

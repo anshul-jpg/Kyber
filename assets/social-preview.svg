@@ -37,7 +37,7 @@
     <text y="75" text-anchor="middle" font-family="'Geist Mono', Consolas, monospace" font-size="16" font-weight="600" letter-spacing="2.5" fill="#38bdf8">AUTONOMOUS POCKET SUPERVISOR</text>
     
     <!-- Description -->
-    <text y="125" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" font-size="19" font-weight="400" fill="#a1a1aa">Local-First Mobile Supervisor &amp; Tool Gatekeeper for Antigravity, Codex &amp; Claude Code</text>
+    <text y="125" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" font-size="19" font-weight="400" fill="#a1a1aa">Local-First Mobile Supervisor &amp; Tool Gatekeeper for Google Antigravity IDE</text>
   </g>
 
   <!-- Bottom Capability Chips -->

@@ -23,22 +23,6 @@ export const SUPPORTED_PROVIDERS: Record<string, ProviderDefinition> = {
     posixProcessNames: ['Antigravity IDE', 'antigravity-ide'],
     defaultExecutable: 'antigravity-ide',
   },
-  'claude-code': {
-    id: 'claude-code',
-    name: 'Claude Code',
-    type: 'cli',
-    windowsProcessNames: ['claude.exe'],
-    posixProcessNames: ['claude'],
-    defaultExecutable: 'claude',
-  },
-  codex: {
-    id: 'codex',
-    name: 'Codex / Copilot',
-    type: 'cli',
-    windowsProcessNames: ['codex.exe'],
-    posixProcessNames: ['codex'],
-    defaultExecutable: 'codex',
-  },
 };
 
 let previousCpuUsage: { idle: number; total: number } | null = null;

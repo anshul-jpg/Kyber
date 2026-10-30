@@ -5,7 +5,7 @@
 <h1 align="center">KYBER</h1>
 
 <p align="center">
-  <strong>Autonomous Pocket Supervisor & Tool Gatekeeper for Antigravity, Codex & Claude Code</strong>
+  <strong>Autonomous Pocket Supervisor & Tool Gatekeeper for Google Antigravity IDE</strong>
 </p>
 
 <p align="center">

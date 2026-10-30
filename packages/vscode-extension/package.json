@@ -1,7 +1,7 @@
 {
   "name": "antigravity-companion",
   "displayName": "KYBER",
-  "description": "Autonomous Pocket Supervisor & Tool Gatekeeper for Antigravity, Codex & Claude Code",
+  "description": "Autonomous Pocket Supervisor & Tool Gatekeeper for Google Antigravity IDE",
   "version": "1.0.0",
   "publisher": "anshuly69",
   "engines": {
@@ -23,9 +23,7 @@
     "remote",
     "approval",
     "mobile",
-    "ai-agent",
-    "codex",
-    "claude-code"
+    "ai-agent"
   ],
   "main": "./dist/extension.js",
   "activationEvents": [

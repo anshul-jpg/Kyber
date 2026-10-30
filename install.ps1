@@ -1,5 +1,5 @@
 # Kyber Universal Installer - PowerShell
-# Autonomous Pocket Supervisor and Tool Gatekeeper for Antigravity, Codex and Claude Code
+# Autonomous Pocket Supervisor and Tool Gatekeeper for Google Antigravity IDE
 # Usage:
 #   irm https://raw.githubusercontent.com/<repo>/master/install.ps1 | iex
 #   or locally: powershell -ExecutionPolicy Bypass -File .\install.ps1
@@ -11,7 +11,7 @@ function Show-Banner {
     Write-Host ""
     Write-Host "===============================================================" -ForegroundColor Cyan
     Write-Host "   KYBER // AUTONOMOUS POCKET SUPERVISOR                       " -ForegroundColor Cyan
-    Write-Host "   Remote Gatekeeper for Antigravity, Codex & Claude Code      " -ForegroundColor Cyan
+    Write-Host "   Remote Gatekeeper for Google Antigravity IDE                " -ForegroundColor Cyan
     Write-Host "===============================================================" -ForegroundColor Cyan
     Write-Host ""
 }

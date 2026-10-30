@@ -5,7 +5,7 @@
 <h1 align="center">kyber</h1>
 
 <p align="center">
-  Local-first mobile supervisor and tool gatekeeper for <strong>Antigravity</strong>, <strong>Codex</strong>, and <strong>Claude Code</strong>.
+  Local-first mobile supervisor and tool gatekeeper for <strong>Google Antigravity IDE</strong>.
 </p>
 
 <p align="center">
