@@ -652,7 +652,7 @@ export class WsGateway {
         const apkDetails = this.getApkDetails();
         const helloMsg: WsServerMessage = {
           type: 'server:hello',
-          daemonVersion: '0.1.0',
+          daemonVersion: '1.0.0',
           workspaces: this.workspaceManager.listWorkspaces(),
           history: this.ideWatcher.getHistory(),
           mode: this.getMode(),

@@ -65,7 +65,7 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
     res.end(
       JSON.stringify({
         status: 'ok',
-        version: '0.1.0',
+        version: '1.0.0',
         workspacesCount: gateway.getWorkspaceManager().listWorkspaces().length,
         pendingApprovals: gateway.getHookIpc().getPendingRequests().length,
         connectedPhoneCount: gateway.getPhoneClients().size,
@@ -1027,17 +1027,27 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
 
   // Serve compiled VS Code VSIX extension package
   if (url === '/download/kyber.vsix' || url === '/download/extension.vsix' || url === '/kyber.vsix') {
-    const candidateVsixPaths = [
-      path.resolve(_dirname, '../../../../packages/vscode-extension/antigravity-companion-0.1.0.vsix'),
-      path.resolve(_dirname, '../extension/antigravity-companion-0.1.0.vsix'),
-      path.resolve(process.cwd(), 'packages/vscode-extension/antigravity-companion-0.1.0.vsix'),
+    const candidateDirs = [
+      path.resolve(_dirname, '../../../../packages/vscode-extension'),
+      path.resolve(_dirname, '../extension'),
+      path.resolve(process.cwd(), 'packages/vscode-extension'),
     ];
-    const vsixPath = candidateVsixPaths.find(p => fs.existsSync(p));
-    if (vsixPath) {
+    let vsixPath: string | undefined;
+    for (const dir of candidateDirs) {
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir);
+        const match = files.find(f => f.endsWith('.vsix'));
+        if (match) {
+          vsixPath = path.join(dir, match);
+          break;
+        }
+      }
+    }
+    if (vsixPath && fs.existsSync(vsixPath)) {
       const stat = fs.statSync(vsixPath);
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
-        'Content-Disposition': 'attachment; filename="kyber-0.1.0.vsix"',
+        'Content-Disposition': 'attachment; filename="kyber.vsix"',
         'Content-Length': stat.size,
       });
       fs.createReadStream(vsixPath).pipe(res);
@@ -1053,7 +1063,7 @@ export function handleHttpRequest(gateway: WsGateway, req: http.IncomingMessage,
   if (url === '/api/apk-status' || url === '/api/version') {
     const details = gateway.getApkDetails();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ version: '0.1.0', ...details }));
+    res.end(JSON.stringify({ version: '1.0.0', ...details }));
     return;
   }
 

@@ -105,7 +105,7 @@ Automatically builds the local extension, installs the global tool interceptor, 
 
 ### Channel 2: VS Code / Antigravity IDE Extension
 
-1. Install **KYBER** directly from the VS Code Marketplace or download `antigravity-companion-0.1.0.vsix` from [Releases](https://github.com/anshul-jpg/Kyber/releases).
+1. Install **KYBER** directly from the VS Code Marketplace or download `antigravity-companion-1.0.0.vsix` from [Releases](https://github.com/anshul-jpg/Kyber/releases).
 2. Open the **KYBER** view in the Activity Bar.
 3. Scan the pairing QR code with your phone camera or navigate to the displayed local URL.
 

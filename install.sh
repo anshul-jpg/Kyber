@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Kyber Universal Installer - Linux / macOS
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/<repo>/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/anshul-jpg/Kyber/main/install.sh | bash
 
 set -e
 
@@ -32,7 +32,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")
 if [ -f "$SCRIPT_DIR/packages/cli/assets/interceptor.js" ]; then
     cp "$SCRIPT_DIR/packages/cli/assets/interceptor.js" "$GLOBAL_INTERCEPTOR"
 else
-    curl -fsSL "https://raw.githubusercontent.com/anshul/kyber/master/packages/cli/assets/interceptor.js" -o "$GLOBAL_INTERCEPTOR" 2>/dev/null || true
+    curl -fsSL "https://raw.githubusercontent.com/anshul-jpg/Kyber/main/packages/cli/assets/interceptor.js" -o "$GLOBAL_INTERCEPTOR" 2>/dev/null || true
 fi
 
 cat <<EOF > "$GLOBAL_HOOKS"

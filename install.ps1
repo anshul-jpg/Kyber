@@ -70,19 +70,19 @@ if (-not $ScriptDir) {
     $ScriptDir = (Get-Location).Path
 }
 
-$LocalVsix = Join-Path $ScriptDir "packages\vscode-extension\antigravity-companion-0.1.0.vsix"
-if (-not (Test-Path $LocalVsix)) {
-    $LocalVsix = Join-Path (Get-Location) "packages\vscode-extension\antigravity-companion-0.1.0.vsix"
+$LocalVsix = Get-ChildItem -Path (Join-Path $ScriptDir "packages\vscode-extension\*.vsix") -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
+if (-not $LocalVsix) {
+    $LocalVsix = Get-ChildItem -Path (Join-Path (Get-Location) "packages\vscode-extension\*.vsix") -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName -First 1
 }
 
-if (Test-Path $LocalVsix) {
+if ($LocalVsix -and (Test-Path $LocalVsix)) {
     Write-Success "Found local VSIX bundle: $LocalVsix"
     $TargetVsix = $LocalVsix
 } else {
     Write-Info "Checking for remote release on GitHub..."
     $TempVsix = Join-Path $env:TEMP "kyber-companion.vsix"
     try {
-        $ReleaseUrl = "https://github.com/anshul-jpg/Kyber/releases/latest/download/antigravity-companion-0.1.0.vsix"
+        $ReleaseUrl = "https://github.com/anshul-jpg/Kyber/releases/latest/download/antigravity-companion-1.0.0.vsix"
         Invoke-WebRequest -Uri $ReleaseUrl -OutFile $TempVsix -UseBasicParsing -ErrorAction Stop
         $TargetVsix = $TempVsix
         Write-Success "Downloaded release bundle to $TempVsix"

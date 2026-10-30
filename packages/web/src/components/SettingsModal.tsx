@@ -1567,7 +1567,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const validTs = (tailscaleIp && !tailscaleIp.startsWith('169.254.')) ? tailscaleIp : (host.startsWith('100.') ? host : '100.107.129.104');
+                      const validTs = (tailscaleIp && !tailscaleIp.startsWith('169.254.')) ? tailscaleIp : (host.startsWith('100.') ? host : (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1'));
                       setHost(validTs);
                       setPort('4040');
                       triggerHaptic(20);
@@ -1589,7 +1589,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      const validLan = host.startsWith('192.168.') || host.startsWith('10.') ? host : '192.168.1.35';
+                      const validLan = host.startsWith('192.168.') || host.startsWith('10.') || host.startsWith('172.') ? host : (typeof window !== 'undefined' ? window.location.hostname : '127.0.0.1');
                       setHost(validLan);
                       setPort('4040');
                       triggerHaptic(20);

@@ -5,7 +5,7 @@ import { encodePairingTicket, decodePairingTicket, PairingTicket } from './index
 test('encodePairingTicket and decodePairingTicket round trip', () => {
   const ticket: PairingTicket = {
     version: 1,
-    host: '100.107.129.104',
+    host: '100.64.0.1',
     port: 4040,
     ssl: false,
     token: 'a1b2c3d4e5f67890123456789abcdef0',

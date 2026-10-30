@@ -231,7 +231,7 @@ function getOrCreateAuthToken(): string {
   const authToken = getOrCreateAuthToken();
 
   console.log('\n===========================================================');
-  console.log('       ANTIGRAVITY COMPANION DAEMON (v0.1.0)');
+  console.log('       ANTIGRAVITY COMPANION DAEMON (v1.0.0)');
   console.log('      "Cloud Gaming, but for Cloud Coding"');
   console.log('===========================================================\n');
 

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/anshul-jpg/Kyber/releases"><img src="https://img.shields.io/badge/version-0.1.0-0078d4?style=flat-square" alt="Version 0.1.0" /></a>
+  <a href="https://github.com/anshul-jpg/Kyber/releases"><img src="https://img.shields.io/badge/version-1.0.0-0078d4?style=flat-square" alt="Version 1.0.0" /></a>
   <a href="https://github.com/anshul-jpg/Kyber/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-262626?style=flat-square" alt="License Apache-2.0" /></a>
   <img src="https://img.shields.io/badge/network-Local--First%20%2F%20WireGuard-0078d4?style=flat-square" alt="Local-First" />
   <img src="https://img.shields.io/badge/telemetry-zero-262626?style=flat-square" alt="Zero Telemetry" />
