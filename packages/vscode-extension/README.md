@@ -31,16 +31,14 @@ Step away from your workstation with confidence — cook, commute, exercise, or 
 
 ## Features
 
-* **Tactile Approval Gate:** High-stakes operations (`run_command`, `write_to_file`, file deletions) trigger immediate lockscreen notifications with 1-tap `[Allow]` / `[Deny]` actions and haptic confirmation.
-* **Interactive Direction (`ask_question`):** Complex agent questions render as selectable chips with custom write-in input, resolving directly back into the IDE turn.
-* **Dual Supervision Modes:**
-  * **Desk Mode:** Standard desktop IDE confirmation dialogs when you are seated at your workstation.
-  * **Remote Mode:** Suppresses PC popups; routes all approvals and notifications silently to your mobile companion with haptic vibration alerts.
-* **Headless Git Triage:** Review working-tree status, examine line-by-line unified diffs with syntax highlighting, stage/unstage files, and author atomic commits directly from your phone.
-* **Live Agent Telemetry:** Watch the agent's thought stream, live terminal output (`stdout`/`stderr`), and real-time model quotas (Claude 3.5 Sonnet, Claude Opus, Gemini Flash) without touching your desk.
-* **Desktop Screen Snapshot Fallback:** On-demand desktop framebuffer capture (`GET /api/host/screen.jpg`) to check external OS dialogs, browser popups, or compiler error windows when away from your monitor.
-* **Local-First & Zero-Trust Mesh:** 100% peer-to-peer over local Wi-Fi or encrypted Tailscale WireGuard. Prompts, diffs, and code never transit third-party relay servers.
-* **Hardware Power & Wake Connectors:** Pluggable connector architecture with built-in hooks for Wake-on-LAN (WoL) and smart plug power cycling.
+* **Unattended Background Supervision:** Persistent Android Foreground Service (`ID 9001`) maintains the supervision loop during deep phone sleep, keeping multi-hour refactors moving without spamming the notification tray.
+* **Tactile Approval Gate with Live Diffs:** Sensitive operations (`run_command`, `write_to_file`, file deletions) trigger immediate lockscreen notifications with 1-tap `[Allow]` / `[Deny]` actions and syntax-highlighted line-by-line diff previews.
+* **Multimodal Voice Notes:** Record and dispatch raw voice notes directly from mobile into the IDE session, allowing Gemini to natively parse speech and execute complex directives.
+* **Live Terminal Stream:** Real-time console output streaming (`stdout`/`stderr`) with exit codes and execution timestamps for long-running compilers and test suites.
+* **Headless Git Triage & Commits:** Review porcelain working-tree status, inspect full unified diffs, stage or unstage files, and author atomic commits directly from your phone.
+* **Language Server Model Quotas:** Live token telemetry, weekly quota percentages, and rate-limit reset countdowns for Claude 3.5 Sonnet, Claude Opus, and Gemini Flash.
+* **Remote Project & Workspace Switching:** Browse host recent IDE projects and hot-swap active agent contexts directly from the mobile drawer.
+* **Local-First & Zero-Trust Mesh:** 100% peer-to-peer over local Wi-Fi or encrypted Tailscale WireGuard. Prompts, diffs, and source code never transit third-party relay servers.
 
 ---
 
