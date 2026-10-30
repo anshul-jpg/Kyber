@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@agy-companion/protocol": "^0.1.0",
+    "@agy-companion/protocol": "*",
     "@capacitor/android": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capacitor/local-notifications": "^8.3.1",

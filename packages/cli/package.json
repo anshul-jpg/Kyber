@@ -16,7 +16,7 @@
     "test": "tsc && node --test dist/**/*.test.js"
   },
   "dependencies": {
-    "@agy-companion/protocol": "^0.1.0",
+    "@agy-companion/protocol": "*",
     "cloudflared": "^0.7.3",
     "qrcode-terminal": "^0.12.0",
     "ws": "^8.18.0"

@@ -40,7 +40,7 @@
     "package": "npm run build && npx @vscode/vsce package --no-dependencies"
   },
   "dependencies": {
-    "@agy-companion/protocol": "^0.1.0",
+    "@agy-companion/protocol": "*",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"
   },
